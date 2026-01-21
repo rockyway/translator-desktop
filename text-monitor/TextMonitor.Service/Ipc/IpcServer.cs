@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -15,6 +16,17 @@ namespace TextMonitor.Service.Ipc;
 /// </summary>
 public class IpcServer : IDisposable
 {
+    // P/Invoke for getting current cursor position (supports multi-monitor with negative coords)
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
     private readonly ILogger<IpcServer> _logger;
     private readonly ISelectionEventAggregator _eventAggregator;
     private readonly ConcurrentDictionary<Guid, ConnectedClient> _connectedClients = new();
@@ -164,6 +176,32 @@ public class IpcServer : IDisposable
         _logger.LogDebug("IPC: Broadcasting text selection event - {Length} characters to {ClientCount} clients",
             selectionEvent.RetrievalResult.Text.Length, _connectedClients.Count);
 
+        // Get cursor position: use tracked coordinates if available, otherwise get current cursor position
+        // This handles the reactive path where coordinates aren't tracked from the start
+        int cursorX, cursorY;
+        if (selectionEvent.Coordinates != null)
+        {
+            cursorX = selectionEvent.Coordinates.EndX;
+            cursorY = selectionEvent.Coordinates.EndY;
+        }
+        else
+        {
+            // Reactive path: get current cursor position (supports multi-monitor with negative coords)
+            if (GetCursorPos(out var cursorPos))
+            {
+                cursorX = cursorPos.X;
+                cursorY = cursorPos.Y;
+                _logger.LogDebug("IPC: Using current cursor position ({X}, {Y}) for reactive path", cursorX, cursorY);
+            }
+            else
+            {
+                // Fallback to 0,0 if GetCursorPos fails (shouldn't happen)
+                cursorX = 0;
+                cursorY = 0;
+                _logger.LogWarning("IPC: GetCursorPos failed, using (0, 0)");
+            }
+        }
+
         // Build the IPC message
         var message = new IpcMessage
         {
@@ -171,8 +209,8 @@ public class IpcServer : IDisposable
             Payload = new TextSelectedPayload
             {
                 Text = selectionEvent.RetrievalResult.Text,
-                CursorX = selectionEvent.Coordinates?.EndX ?? 0,
-                CursorY = selectionEvent.Coordinates?.EndY ?? 0,
+                CursorX = cursorX,
+                CursorY = cursorY,
                 SourceApp = selectionEvent.RetrievalResult.SourceApplication ?? "unknown",
                 WindowTitle = selectionEvent.RetrievalResult.ElementType
             },

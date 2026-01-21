@@ -234,6 +234,7 @@ fn handle_message(app_handle: &AppHandle, message: IpcMessage) {
 /// Stores text in popup state and shows the popup window.
 /// If popup is already visible, keeps current position.
 /// If popup is not visible, positions at cursor with smart screen-edge detection.
+/// Supports multi-monitor setups including monitors with negative coordinates (left of main).
 fn show_popup_with_text(app_handle: &AppHandle, text: String, cursor_x: i32, cursor_y: i32) {
     // Clone what we need before spawning async task
     let app_handle_clone = app_handle.clone();
@@ -263,7 +264,7 @@ fn show_popup_with_text(app_handle: &AppHandle, text: String, cursor_x: i32, cur
                 }
             } else {
                 // Popup not visible - show at cursor position with smart positioning
-                log::info!("IPC: Popup not visible, showing at cursor position");
+                log::info!("IPC: Popup not visible, showing at cursor ({}, {})", cursor_x, cursor_y);
 
                 // Use smart positioning with screen-edge detection
                 let popup_size = window.outer_size().unwrap_or_default();
@@ -276,15 +277,24 @@ fn show_popup_with_text(app_handle: &AppHandle, text: String, cursor_x: i32, cur
                 let offset_x = (10.0 * scale_factor) as i32;
                 let offset_y = (10.0 * scale_factor) as i32;
 
+                // Find the monitor that contains the cursor position
+                // This is critical for multi-monitor setups, especially with negative coordinates
+                let monitor = find_monitor_at_point(&app_handle_clone, cursor_x, cursor_y);
+
                 // Calculate position with screen-edge detection
-                let (final_x, final_y) = if let Ok(Some(monitor)) = window.current_monitor() {
-                    let monitor_pos = monitor.position();
-                    let monitor_size = monitor.size();
+                let (final_x, final_y) = if let Some(mon) = monitor {
+                    let monitor_pos = mon.position();
+                    let monitor_size = mon.size();
 
                     let monitor_left = monitor_pos.x;
                     let monitor_top = monitor_pos.y;
                     let monitor_right = monitor_pos.x + monitor_size.width as i32;
                     let monitor_bottom = monitor_pos.y + monitor_size.height as i32;
+
+                    log::debug!(
+                        "IPC: Monitor bounds: ({}, {}) to ({}, {})",
+                        monitor_left, monitor_top, monitor_right, monitor_bottom
+                    );
 
                     let mut pos_x = cursor_x + offset_x;
                     let mut pos_y = cursor_y + offset_y;
@@ -313,6 +323,8 @@ fn show_popup_with_text(app_handle: &AppHandle, text: String, cursor_x: i32, cur
 
                     (pos_x, pos_y)
                 } else {
+                    // No monitor found - use cursor position with offset (fallback)
+                    log::warn!("IPC: No monitor found for cursor position, using direct offset");
                     (cursor_x + offset_x, cursor_y + offset_y)
                 };
 
@@ -348,4 +360,37 @@ fn show_popup_with_text(app_handle: &AppHandle, text: String, cursor_x: i32, cur
             log::warn!("IPC: Popup window not found");
         }
     });
+}
+
+/// Finds the monitor that contains the given point (x, y).
+/// Supports multi-monitor setups with negative coordinates (monitors left of primary).
+fn find_monitor_at_point(app_handle: &AppHandle, x: i32, y: i32) -> Option<tauri::Monitor> {
+    if let Ok(monitors) = app_handle.available_monitors() {
+        for monitor in monitors {
+            let pos = monitor.position();
+            let size = monitor.size();
+
+            let left = pos.x;
+            let top = pos.y;
+            let right = pos.x + size.width as i32;
+            let bottom = pos.y + size.height as i32;
+
+            // Check if point is within this monitor's bounds
+            if x >= left && x < right && y >= top && y < bottom {
+                log::debug!(
+                    "IPC: Found monitor for point ({}, {}): {:?} at ({}, {}) size {}x{}",
+                    x, y,
+                    monitor.name(),
+                    left, top, size.width, size.height
+                );
+                return Some(monitor);
+            }
+        }
+        log::warn!("IPC: Point ({}, {}) not found on any monitor", x, y);
+    } else {
+        log::error!("IPC: Failed to enumerate monitors");
+    }
+
+    // Fallback to primary monitor if point not found on any monitor
+    app_handle.primary_monitor().ok().flatten()
 }
