@@ -8,6 +8,7 @@ import {
   getLanguageByCode,
   getTargetLanguages,
   LanguageOption,
+  TranslationMetadata,
 } from '../../services/translationService';
 import { useTheme } from '../../hooks/useTheme';
 
@@ -31,7 +32,13 @@ export interface PopupOverlayProps {
   /** Callback when the popup should close */
   onClose: () => void;
   /** Callback to open the main translator window with current state */
-  onOpenMain: (sourceText: string, translatedText: string, sourceLang: string, targetLang: string) => void;
+  onOpenMain: (
+    sourceText: string,
+    translatedText: string,
+    sourceLang: string,
+    targetLang: string,
+    metadata?: TranslationMetadata
+  ) => void;
   /** Default target language code (default: 'vi' for Vietnamese) */
   defaultTargetLanguage?: string;
 }
@@ -148,6 +155,7 @@ export function PopupOverlay({
     translate,
     translatedText,
     detectedLanguage,
+    metadata,
     isLoading,
     error,
   } = useTranslation({
@@ -185,13 +193,18 @@ export function PopupOverlay({
       const sourceSectionHeight = SECTION_LABEL_HEIGHT + Math.min(minSourceHeight, LINE_HEIGHT * 4);
       const targetSectionHeight = SECTION_LABEL_HEIGHT + minTargetHeight;
 
-      const totalHeight =
+      let totalHeight =
         TITLE_BAR_HEIGHT +
         sourceSectionHeight +
         DIVIDER_HEIGHT +
         targetSectionHeight +
         FOOTER_HEIGHT +
         CONTENT_PADDING;
+
+      // Add extra space for definitions if present (compact inline layout)
+      if (metadata?.definitions && metadata.definitions.length > 0) {
+        totalHeight += 45; // Reduced space for compact inline definitions
+      }
 
       // Clamp to reasonable bounds
       const clampedHeight = Math.max(MIN_POPUP_HEIGHT, Math.min(totalHeight, MAX_POPUP_HEIGHT));
@@ -207,7 +220,7 @@ export function PopupOverlay({
     if (!isLoading && (translatedText || error)) {
       resizePopup();
     }
-  }, [text, translatedText, isLoading, error]);
+  }, [text, translatedText, isLoading, error, metadata]);
 
   // Handle keyboard shortcuts (Escape to close)
   useEffect(() => {
@@ -284,9 +297,9 @@ export function PopupOverlay({
   // Handle open in main window with content transfer
   const handleOpenMain = useCallback(() => {
     const sourceLang = detectedLanguage || 'auto';
-    onOpenMain(text, translatedText, sourceLang, targetLanguage);
+    onOpenMain(text, translatedText, sourceLang, targetLanguage, metadata);
     onClose();
-  }, [onOpenMain, onClose, text, translatedText, detectedLanguage, targetLanguage]);
+  }, [onOpenMain, onClose, text, translatedText, detectedLanguage, targetLanguage, metadata]);
 
   // Handle language change
   const handleTargetLanguageChange = useCallback((code: string) => {
@@ -426,12 +439,28 @@ export function PopupOverlay({
 
               {/* Translated Text */}
               {!isLoading && !error && (
-                <p
-                  ref={targetTextRef}
-                  className="text-sm text-gray-900 dark:text-gray-100 leading-relaxed font-medium whitespace-pre-wrap"
-                >
-                  {translatedText || 'Waiting for text...'}
-                </p>
+                <>
+                  <p
+                    ref={targetTextRef}
+                    className="text-sm text-gray-900 dark:text-gray-100 leading-relaxed font-medium whitespace-pre-wrap"
+                  >
+                    {translatedText || 'Waiting for text...'}
+                  </p>
+
+                  {/* Compact Definitions - inline after translation */}
+                  {metadata?.definitions && metadata.definitions.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                      {metadata.definitions.slice(0, 2).map((def, idx) => (
+                        <div key={idx} className="text-xs text-gray-600 dark:text-gray-400">
+                          <span className="inline-block px-1 py-0.5 rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-medium mr-1.5">
+                            {def.partOfSpeech}
+                          </span>
+                          {def.entries[0]?.gloss}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

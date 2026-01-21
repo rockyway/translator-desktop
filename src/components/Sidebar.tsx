@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import {
   FiMessageSquare,
   FiClock,
   FiSettings,
   FiChevronLeft,
   FiChevronRight,
+  FiPower,
 } from 'react-icons/fi';
 
 // ============================================================================
@@ -18,8 +20,6 @@ export interface SidebarProps {
   onTabChange: (tab: SidebarTab) => void;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
-  isConnected: boolean;
-  textMonitorVersion: string | null;
 }
 
 interface NavItemProps {
@@ -125,118 +125,63 @@ function NavItem({ icon, label, isActive, isCollapsed, onClick }: NavItemProps) 
   );
 }
 
+
 /**
- * Connection status indicator
+ * Exit button component
  */
-function ConnectionStatus({
-  isConnected,
-  isCollapsed,
-  textMonitorVersion,
-}: {
-  isConnected: boolean;
-  isCollapsed: boolean;
-  textMonitorVersion: string | null;
-}) {
+function ExitButton({ isCollapsed }: { isCollapsed: boolean }) {
+  const handleExit = async () => {
+    try {
+      await invoke('exit_app');
+    } catch (error) {
+      console.error('Failed to exit app:', error);
+    }
+  };
+
   return (
-    <div
+    <button
+      type="button"
+      onClick={handleExit}
+      aria-label="Exit application"
       className={`
-        flex items-center gap-3 px-4 py-3
+        group relative w-full flex items-center gap-3 px-4 py-3
+        text-sm font-medium transition-all duration-200 ease-out
+        text-gray-400 hover:text-red-400 hover:bg-red-500/10
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500
+        focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900
+        border-t border-gray-800/50
         ${isCollapsed ? 'justify-center px-0' : ''}
       `}
-      aria-label={isConnected ? 'Connected to text monitor' : 'Disconnected from text monitor'}
     >
-      {/* Status dot */}
-      <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
-        <span
-          className={`
-            absolute inline-flex h-full w-full rounded-full opacity-75
-            ${isConnected ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}
-          `}
-          style={{ animationDuration: isConnected ? '2s' : undefined }}
-        />
-        <span
-          className={`
-            relative inline-flex rounded-full h-2.5 w-2.5
-            ${isConnected ? 'bg-emerald-500' : 'bg-amber-500'}
-          `}
-        />
+      <span className="text-gray-500 group-hover:text-red-400 transition-colors duration-200">
+        <FiPower className="w-5 h-5 flex-shrink-0" />
       </span>
 
-      {/* Status text and version */}
-      <div
-        className={`
-          flex flex-col transition-all duration-300 ease-in-out
-          overflow-hidden
-          ${isCollapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}
-        `}
-      >
-        <span
-          className={`
-            text-xs font-medium whitespace-nowrap
-            ${isConnected ? 'text-emerald-400' : 'text-amber-400'}
-          `}
-        >
-          {isConnected ? 'Connected' : 'Disconnected'}
-        </span>
-        {isConnected && textMonitorVersion && (
-          <span className="text-xs text-gray-400 whitespace-nowrap">
-            v{textMonitorVersion}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Brand/logo area at top of sidebar
- */
-function BrandArea({ isCollapsed }: { isCollapsed: boolean }) {
-  return (
-    <div
-      className={`
-        flex items-center gap-3 px-4 py-5 border-b border-gray-800/50
-        ${isCollapsed ? 'justify-center px-0' : ''}
-      `}
-    >
-      {/* Logo icon - always visible */}
-      <div
-        className="
-          flex items-center justify-center w-8 h-8 rounded-lg
-          bg-gradient-to-br from-amber-400 to-amber-600
-          shadow-lg shadow-amber-500/20 flex-shrink-0
-        "
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="w-4 h-4 text-white"
-          aria-hidden="true"
-        >
-          <path d="M5 8l6 6" />
-          <path d="M4 14l6-6 2-3" />
-          <path d="M2 5h12" />
-          <path d="M7 2h1" />
-          <path d="M22 22l-5-10-5 10" />
-          <path d="M14 18h6" />
-        </svg>
-      </div>
-
-      {/* Brand text - fades when collapsed */}
       <span
         className={`
-          text-base font-semibold text-white tracking-tight
           transition-all duration-300 ease-in-out whitespace-nowrap overflow-hidden
           ${isCollapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}
         `}
       >
-        Translator
+        Exit
       </span>
-    </div>
+
+      {/* Tooltip on hover when collapsed */}
+      {isCollapsed && (
+        <span
+          className="
+            absolute left-full ml-2 px-2 py-1 text-xs font-medium
+            bg-gray-800 text-white rounded shadow-lg
+            opacity-0 invisible group-hover:opacity-100 group-hover:visible
+            transition-all duration-200 z-50 whitespace-nowrap
+            pointer-events-none
+          "
+          role="tooltip"
+        >
+          Exit
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -290,7 +235,6 @@ function CollapseToggle({
  * - Smooth expand/collapse transitions
  * - Icon-only mode when collapsed
  * - Responsive behavior (auto-collapse on small screens)
- * - Connection status indicator
  * - Accessible keyboard navigation
  */
 export function Sidebar({
@@ -298,8 +242,6 @@ export function Sidebar({
   onTabChange,
   isCollapsed,
   onToggleCollapse,
-  isConnected,
-  textMonitorVersion,
 }: SidebarProps) {
   // Track window width for responsive behavior
   const [windowWidth, setWindowWidth] = useState(
@@ -328,22 +270,19 @@ export function Sidebar({
   return (
     <aside
       className="
-        fixed left-0 top-10 z-40
+        flex-shrink-0 h-full z-40
         bg-gray-900 dark:bg-gray-950
         border-r border-gray-800/50
         flex flex-col
         transition-all duration-300 ease-in-out
         shadow-xl shadow-black/20
       "
-      style={{ width: sidebarWidth, height: 'calc(100vh - 2.5rem)' }}
+      style={{ width: sidebarWidth }}
       role="navigation"
       aria-label="Main navigation"
     >
-      {/* Brand area */}
-      <BrandArea isCollapsed={isCollapsed} />
-
       {/* Navigation items */}
-      <nav className="flex-1 py-4" role="menubar">
+      <nav className="flex-1 pt-2" role="menubar">
         <ul className="space-y-1" role="menu">
           {NAV_ITEMS.map((item) => (
             <li key={item.tab} role="none">
@@ -362,8 +301,8 @@ export function Sidebar({
       {/* Spacer */}
       <div className="flex-grow" />
 
-      {/* Connection status */}
-      <ConnectionStatus isConnected={isConnected} isCollapsed={isCollapsed} textMonitorVersion={textMonitorVersion} />
+      {/* Exit button */}
+      <ExitButton isCollapsed={isCollapsed} />
 
       {/* Collapse toggle */}
       <CollapseToggle isCollapsed={isCollapsed} onToggle={onToggleCollapse} />

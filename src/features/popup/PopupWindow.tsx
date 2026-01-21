@@ -4,6 +4,7 @@ import { listen, emit } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ThemeProvider } from '../../contexts/ThemeContext';
 import { PopupOverlay } from './PopupOverlay';
+import { TranslationMetadata } from '../../services/translationService';
 
 /**
  * PopupWindow - Tauri-integrated wrapper for PopupOverlay
@@ -66,7 +67,8 @@ export function PopupWindow() {
     sourceText: string,
     translatedText: string,
     sourceLang: string,
-    targetLang: string
+    targetLang: string,
+    metadata?: TranslationMetadata
   ) => {
     try {
       // Get the main window and show/focus it
@@ -80,6 +82,7 @@ export function PopupWindow() {
           translatedText,
           sourceLang,
           targetLang,
+          metadata,
         });
 
         await mainWindow.show();

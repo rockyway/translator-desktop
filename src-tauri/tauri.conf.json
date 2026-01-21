@@ -16,7 +16,7 @@
         "label": "main",
         "title": "Translator Desktop",
         "width": 900,
-        "height": 700,
+        "height": 980,
         "minWidth": 600,
         "minHeight": 400,
         "resizable": true,

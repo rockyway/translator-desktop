@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { FiVolume2, FiCopy, FiRepeat, FiAlertCircle, FiRefreshCw, FiArrowRight } from 'react-icons/fi';
 import { LanguageSelector } from './LanguageSelector';
+import { MetadataSection } from './MetadataSection';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useSettings } from '../../hooks/useSettings';
 import {
@@ -9,6 +10,7 @@ import {
   getTargetLanguages,
   getLanguageByCode,
   playTextToSpeech,
+  TranslationMetadata,
 } from '../../services/translationService';
 
 interface TranslationPanelProps {
@@ -21,6 +23,8 @@ interface TranslationPanelProps {
   initialSourceLang?: string;
   /** Initial target language code */
   initialTargetLang?: string;
+  /** Initial metadata (from popup - already fetched, no need to re-fetch) */
+  initialMetadata?: TranslationMetadata;
 }
 
 interface FormInputs {
@@ -69,6 +73,7 @@ export function TranslationPanel({
   initialTranslatedText,
   initialSourceLang,
   initialTargetLang,
+  initialMetadata,
 }: TranslationPanelProps) {
   // Settings context for persisting language preferences
   const { settings, updateSetting } = useSettings();
@@ -91,6 +96,11 @@ export function TranslationPanel({
     initialTranslatedText
   );
 
+  // Displayed metadata: prefer initial (from popup) over hook result
+  const [displayedMetadata, setDisplayedMetadata] = useState<TranslationMetadata | undefined>(
+    initialMetadata
+  );
+
   // Form setup with React Hook Form
   const { register, watch, setValue } = useForm<FormInputs>({
     defaultValues: {
@@ -105,6 +115,7 @@ export function TranslationPanel({
     translate,
     translatedText: hookTranslatedText,
     detectedLanguage,
+    metadata,
     isLoading,
     error,
   } = useTranslation({
@@ -115,6 +126,13 @@ export function TranslationPanel({
 
   // Effective translated text: prefer pre-translated (from popup) over hook result
   const translatedText = preTranslatedText || hookTranslatedText;
+
+  // Update displayed metadata when hook returns new data
+  useEffect(() => {
+    if (metadata) {
+      setDisplayedMetadata(metadata);
+    }
+  }, [metadata]);
 
   // Ref for aria-live region
   const translationResultRef = useRef<HTMLDivElement>(null);
@@ -263,10 +281,12 @@ export function TranslationPanel({
         {/* LEFT PANEL: Source Language + Input */}
         <div className="flex-1 min-w-0">
           {/* Source Language Selector */}
-          <div className="mb-3">
+          <div className="flex items-center gap-3 mb-3">
+            <label htmlFor="source-language" className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">From</label>
             <LanguageSelector
               id="source-language"
-              label="Translate from"
+              label="From"
+              hideLabel
               value={sourceLanguage}
               onChange={handleSourceLanguageChange}
               languages={sourceLanguages}
@@ -275,6 +295,7 @@ export function TranslationPanel({
                   ? `Detected: ${detectedLanguageName}`
                   : undefined
               }
+              className="flex-1"
             />
           </div>
 
@@ -291,7 +312,7 @@ export function TranslationPanel({
                 placeholder="Enter text to translate..."
                 aria-label="Text to translate"
                 aria-describedby="char-count"
-                className="w-full min-h-[180px] resize-none bg-transparent
+                className="w-full min-h-[100px] resize-none bg-transparent
                   text-gray-900 dark:text-gray-100 placeholder-amber-400 dark:placeholder-amber-500
                   focus:outline-none text-lg leading-relaxed"
                 maxLength={maxChars}
@@ -369,25 +390,28 @@ export function TranslationPanel({
         {/* RIGHT PANEL: Target Language + Output */}
         <div className="flex-1 min-w-0">
           {/* Target Language Selector */}
-          <div className="mb-3">
+          <div className="flex items-center gap-3 mb-3">
+            <label htmlFor="target-language" className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">To</label>
             <LanguageSelector
               id="target-language"
-              label="Translate to"
+              label="To"
+              hideLabel
               value={targetLanguage}
               onChange={handleTargetLanguageChange}
               languages={targetLanguages}
+              className="flex-1"
             />
           </div>
 
           {/* Output Area */}
           <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl border-2 border-blue-300 dark:border-blue-700 shadow-lg overflow-hidden">
-            <div className="p-4 flex flex-col min-h-[252px]">
+            <div className="p-4 flex flex-col">
               {/* Translation Result */}
               <div
                 ref={translationResultRef}
                 aria-live="polite"
                 aria-atomic="true"
-                className="flex-1 min-h-[180px]"
+                className="flex-1 min-h-[100px]"
               >
                 {/* Loading State */}
                 {isLoading && (
@@ -495,6 +519,9 @@ export function TranslationPanel({
           </div>
         </div>
       </div>
+
+      {/* Metadata Section */}
+      <MetadataSection metadata={displayedMetadata} isLoading={isLoading} className="mt-6" />
     </div>
   );
 }

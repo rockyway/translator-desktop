@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import { FiCheck, FiMoon, FiSun, FiMonitor } from 'react-icons/fi';
+import { FiCheck, FiMoon, FiSun, FiMonitor, FiType } from 'react-icons/fi';
 import { useSettings } from '../../hooks/useSettings';
-import type { Theme, SelectionModifier, HotkeyModifier } from '../../contexts/SettingsContext';
+import type { Theme, SelectionModifier, HotkeyModifier, DensityPreset } from '../../contexts/SettingsContext';
+import { DENSITY_VALUES } from '../../contexts/SettingsContext';
 
 // ============================================================================
 // Types
@@ -24,6 +25,13 @@ interface HotkeyModifierOption {
   value: HotkeyModifier;
   label: string;
   shortcut: string;
+  description: string;
+}
+
+interface DensityOption {
+  value: DensityPreset;
+  label: string;
+  percentage: number | null; // null for custom
   description: string;
 }
 
@@ -88,6 +96,33 @@ const HOTKEY_MODIFIER_OPTIONS: HotkeyModifierOption[] = [
     label: 'Alt+Shift',
     shortcut: 'Alt+Shift+Q',
     description: 'Without Ctrl key',
+  },
+];
+
+const DENSITY_OPTIONS: DensityOption[] = [
+  {
+    value: 'default',
+    label: 'Default',
+    percentage: DENSITY_VALUES.default,
+    description: 'Standard text size (100%)',
+  },
+  {
+    value: 'large',
+    label: 'Large',
+    percentage: DENSITY_VALUES.large,
+    description: 'Comfortable reading (110%)',
+  },
+  {
+    value: 'xlarge',
+    label: 'X-Large',
+    percentage: DENSITY_VALUES.xlarge,
+    description: 'Maximum legibility (125%)',
+  },
+  {
+    value: 'custom',
+    label: 'Custom',
+    percentage: null,
+    description: 'Set your own size',
   },
 ];
 
@@ -310,6 +345,113 @@ function HotkeyModifierSelector({ value, onChange }: HotkeyModifierSelectorProps
   );
 }
 
+interface DensitySelectorProps {
+  value: DensityPreset;
+  customValue: number;
+  onChange: (preset: DensityPreset) => void;
+  onCustomChange: (value: number) => void;
+}
+
+/**
+ * Density selector with preset options and custom slider
+ */
+function DensitySelector({
+  value,
+  customValue,
+  onChange,
+  onCustomChange,
+}: DensitySelectorProps) {
+  return (
+    <div className="space-y-3">
+      {/* Preset buttons */}
+      <div className="flex flex-wrap gap-2">
+        {DENSITY_OPTIONS.map((option) => {
+          const isSelected = value === option.value;
+
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              aria-pressed={isSelected}
+              aria-label={option.description}
+              className={`
+                flex items-center gap-2 px-4 py-2.5 rounded-lg
+                transition-all duration-150 font-medium text-sm
+                focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2
+                dark:focus:ring-offset-gray-800
+                ${
+                  isSelected
+                    ? 'bg-amber-500 text-white shadow-md'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }
+              `}
+            >
+              {option.value === 'custom' && (
+                <FiType className="w-4 h-4" aria-hidden="true" />
+              )}
+              <span>{option.label}</span>
+              {option.percentage && (
+                <span className={`text-xs ${isSelected ? 'text-amber-100' : 'text-gray-400 dark:text-gray-500'}`}>
+                  {option.percentage}%
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Custom value slider - only show when custom is selected */}
+      {value === 'custom' && (
+        <div className="pt-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              Custom size
+            </span>
+            <span className="text-sm font-semibold text-amber-600 dark:text-amber-400 tabular-nums">
+              {customValue}%
+            </span>
+          </div>
+          <div className="relative">
+            <input
+              type="range"
+              min="75"
+              max="200"
+              step="5"
+              value={customValue}
+              onChange={(e) => onCustomChange(Number(e.target.value))}
+              className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer
+                [&::-webkit-slider-thumb]:appearance-none
+                [&::-webkit-slider-thumb]:w-5
+                [&::-webkit-slider-thumb]:h-5
+                [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-amber-500
+                [&::-webkit-slider-thumb]:shadow-md
+                [&::-webkit-slider-thumb]:cursor-pointer
+                [&::-webkit-slider-thumb]:transition-transform
+                [&::-webkit-slider-thumb]:hover:scale-110
+                [&::-moz-range-thumb]:w-5
+                [&::-moz-range-thumb]:h-5
+                [&::-moz-range-thumb]:rounded-full
+                [&::-moz-range-thumb]:bg-amber-500
+                [&::-moz-range-thumb]:border-0
+                [&::-moz-range-thumb]:shadow-md
+                [&::-moz-range-thumb]:cursor-pointer"
+              aria-label="Custom density percentage"
+            />
+            {/* Scale markers */}
+            <div className="flex justify-between text-xs text-gray-400 dark:text-gray-500 mt-1 px-0.5">
+              <span>75%</span>
+              <span>125%</span>
+              <span>200%</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface SavedIndicatorProps {
   visible: boolean;
 }
@@ -342,7 +484,6 @@ function SavedIndicator({ visible }: SavedIndicatorProps) {
 
 interface SettingsPanelProps {
   className?: string;
-  textMonitorVersion?: string | null;
 }
 
 /**
@@ -357,7 +498,7 @@ interface SettingsPanelProps {
  *
  * All settings auto-save with a subtle "Saved" indicator.
  */
-export function SettingsPanel({ className = '', textMonitorVersion }: SettingsPanelProps) {
+export function SettingsPanel({ className = '' }: SettingsPanelProps) {
   const { settings, updateSetting, isLoading } = useSettings();
   const [showSaved, setShowSaved] = useState(false);
 
@@ -389,6 +530,14 @@ export function SettingsPanel({ className = '', textMonitorVersion }: SettingsPa
     [updateSetting, flashSavedIndicator]
   );
 
+  const handleMinimizeToTrayChange = useCallback(
+    (minimizeToTray: boolean) => {
+      updateSetting('minimizeToTray', minimizeToTray);
+      flashSavedIndicator();
+    },
+    [updateSetting, flashSavedIndicator]
+  );
+
   const handleSelectionModifierChange = useCallback(
     (modifier: SelectionModifier) => {
       updateSetting('selectionModifier', modifier);
@@ -400,6 +549,22 @@ export function SettingsPanel({ className = '', textMonitorVersion }: SettingsPa
   const handleHotkeyModifierChange = useCallback(
     (modifier: HotkeyModifier) => {
       updateSetting('hotkeyModifier', modifier);
+      flashSavedIndicator();
+    },
+    [updateSetting, flashSavedIndicator]
+  );
+
+  const handleDensityChange = useCallback(
+    (preset: DensityPreset) => {
+      updateSetting('density', preset);
+      flashSavedIndicator();
+    },
+    [updateSetting, flashSavedIndicator]
+  );
+
+  const handleCustomDensityChange = useCallback(
+    (value: number) => {
+      updateSetting('customDensity', value);
       flashSavedIndicator();
     },
     [updateSetting, flashSavedIndicator]
@@ -460,6 +625,22 @@ export function SettingsPanel({ className = '', textMonitorVersion }: SettingsPa
             onChange={handleThemeChange}
           />
         </SettingRow>
+        <div className="pt-2">
+          <div className="flex-1 min-w-0 mb-3">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Density
+            </span>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Adjust text size across the entire app
+            </p>
+          </div>
+          <DensitySelector
+            value={settings.density}
+            customValue={settings.customDensity}
+            onChange={handleDensityChange}
+            onCustomChange={handleCustomDensityChange}
+          />
+        </div>
       </SettingSection>
 
       {/* Interface Section */}
@@ -472,6 +653,16 @@ export function SettingsPanel({ className = '', textMonitorVersion }: SettingsPa
             checked={settings.sidebarCollapsed}
             onChange={handleSidebarCollapsedChange}
             label="Collapse sidebar by default"
+          />
+        </SettingRow>
+        <SettingRow
+          label="Minimize to system tray on close"
+          description="Closing the window minimizes to tray instead of exiting"
+        >
+          <ToggleSwitch
+            checked={settings.minimizeToTray}
+            onChange={handleMinimizeToTrayChange}
+            label="Minimize to system tray on close"
           />
         </SettingRow>
       </SettingSection>
@@ -496,11 +687,6 @@ export function SettingsPanel({ className = '', textMonitorVersion }: SettingsPa
             onChange={handleHotkeyModifierChange}
           />
         </SettingRow>
-        {textMonitorVersion && (
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-2 pt-4 border-t border-gray-200 dark:border-gray-700">
-            Text Monitor: v{textMonitorVersion}
-          </div>
-        )}
       </SettingSection>
 
       {/* Saved Indicator */}

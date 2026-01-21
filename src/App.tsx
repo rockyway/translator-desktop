@@ -4,10 +4,12 @@ import { SettingsProvider } from "./contexts/SettingsContext";
 import { useSettings } from "./hooks/useSettings";
 import { Sidebar, SidebarTab } from "./components/Sidebar";
 import { TitleBar } from "./components/TitleBar";
+import { StatusBar } from "./components/StatusBar";
 import { TranslationPanel } from "./features/translator/TranslationPanel";
 import { HistoryPanel } from "./features/history";
 import { SettingsPanel } from "./features/settings";
 import { useIpcListener } from "./hooks/useIpcListener";
+import { TranslationMetadata } from "./services/translationService";
 
 // ============================================================================
 // Types
@@ -18,6 +20,7 @@ interface ContentTransfer {
   translatedText: string;
   sourceLang: string;
   targetLang: string;
+  metadata?: TranslationMetadata;
 }
 
 // Flag to indicate content came from popup (already translated)
@@ -26,6 +29,7 @@ interface InitialContent {
   translatedText?: string;
   sourceLang?: string;
   targetLang?: string;
+  metadata?: TranslationMetadata;
   /** Unique key to force TranslationPanel remount when content changes */
   contentKey: number;
 }
@@ -45,12 +49,13 @@ function AppContent() {
   // Listen for content transfer from popup (already translated)
   useEffect(() => {
     const unlisten = listen<ContentTransfer>('open-main-with-content', (event) => {
-      const { sourceText, translatedText, sourceLang, targetLang } = event.payload;
+      const { sourceText, translatedText, sourceLang, targetLang, metadata } = event.payload;
       setInitialContent({
         text: sourceText,
         translatedText, // Pass the already-translated text
         sourceLang,
         targetLang,
+        metadata,
         contentKey: Date.now(), // Force remount
       });
       setActiveTab('translate');
@@ -78,61 +83,66 @@ function AppContent() {
     updateSetting('sidebarCollapsed', !settings.sidebarCollapsed);
   }, [settings.sidebarCollapsed, updateSetting]);
 
-  // Calculate main content margin based on sidebar state
-  const mainMarginClass = settings.sidebarCollapsed ? 'ml-14' : 'ml-[200px]';
-
   return (
-    <div className="h-screen flex bg-gray-50 dark:bg-gray-900 transition-colors">
-      {/* Custom Title Bar */}
+    <div className="h-screen flex flex-col bg-gray-50 dark:bg-gray-900 transition-colors overflow-hidden">
+      {/* Custom Title Bar - Fixed height, non-scrolling */}
       <TitleBar />
 
-      {/* Sidebar Navigation */}
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        isCollapsed={settings.sidebarCollapsed}
-        onToggleCollapse={handleToggleCollapse}
+      {/* Content wrapper below title bar */}
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar Navigation */}
+        <Sidebar
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          isCollapsed={settings.sidebarCollapsed}
+          onToggleCollapse={handleToggleCollapse}
+        />
+
+        {/* Main Content Area - Scrollable content contained here */}
+        <main
+          className="flex-1 overflow-y-auto custom-scrollbar"
+        >
+          <div className="p-6 min-h-full">
+            <div className="max-w-6xl mx-auto">
+              {/* Panel Content */}
+              <div
+                className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 border border-gray-200 dark:border-gray-700"
+                role="tabpanel"
+                aria-label={
+                  activeTab === 'translate'
+                    ? 'Translation panel'
+                    : activeTab === 'history'
+                      ? 'History panel'
+                      : 'Settings panel'
+                }
+              >
+                {activeTab === 'translate' && (
+                  <TranslationPanel
+                    key={initialContent?.contentKey ?? 'default'}
+                    initialText={initialContent?.text}
+                    initialTranslatedText={initialContent?.translatedText}
+                    initialSourceLang={initialContent?.sourceLang}
+                    initialTargetLang={initialContent?.targetLang}
+                    initialMetadata={initialContent?.metadata}
+                  />
+                )}
+                {activeTab === 'history' && (
+                  <HistoryPanel onSelectEntry={handleSelectHistoryEntry} />
+                )}
+                {activeTab === 'settings' && (
+                  <SettingsPanel />
+                )}
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      {/* Status Bar - Fixed at bottom */}
+      <StatusBar
         isConnected={isConnected}
         textMonitorVersion={textMonitorVersion}
       />
-
-      {/* Main Content Area */}
-      <main
-        className={`flex-1 ${mainMarginClass} transition-all duration-300 ease-in-out overflow-y-auto pt-10`}
-      >
-        <div className="p-6 min-h-full">
-          <div className="max-w-6xl mx-auto">
-            {/* Panel Content */}
-            <div
-              className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 border border-gray-200 dark:border-gray-700"
-              role="tabpanel"
-              aria-label={
-                activeTab === 'translate'
-                  ? 'Translation panel'
-                  : activeTab === 'history'
-                    ? 'History panel'
-                    : 'Settings panel'
-              }
-            >
-              {activeTab === 'translate' && (
-                <TranslationPanel
-                  key={initialContent?.contentKey ?? 'default'}
-                  initialText={initialContent?.text}
-                  initialTranslatedText={initialContent?.translatedText}
-                  initialSourceLang={initialContent?.sourceLang}
-                  initialTargetLang={initialContent?.targetLang}
-                />
-              )}
-              {activeTab === 'history' && (
-                <HistoryPanel onSelectEntry={handleSelectHistoryEntry} />
-              )}
-              {activeTab === 'settings' && (
-                <SettingsPanel textMonitorVersion={textMonitorVersion} />
-              )}
-            </div>
-          </div>
-        </div>
-      </main>
     </div>
   );
 }

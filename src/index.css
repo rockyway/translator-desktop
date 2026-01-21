@@ -11,6 +11,17 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* Theme scrollbar colors */
+  --scrollbar-track: rgba(59, 130, 246, 0.1);
+  --scrollbar-thumb: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+  --scrollbar-thumb-hover: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+}
+
+.dark {
+  --scrollbar-track: rgba(59, 130, 246, 0.15);
+  --scrollbar-thumb: linear-gradient(180deg, #f59e0b 0%, #b45309 100%);
+  --scrollbar-thumb-hover: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
 }
 
 body {
@@ -24,4 +35,56 @@ body {
   width: 100%;
   height: 100vh;
   overflow: hidden;
+}
+
+/* Custom Scrollbar Styles - Gold/Blue Theme */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #f59e0b rgba(59, 130, 246, 0.1);
+}
+
+/* Webkit browsers (Chrome, Safari, Edge) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 8px;
+  margin: 4px 0;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+/* Corner piece where scrollbars meet */
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Dark mode scrollbar adjustments */
+.dark .custom-scrollbar {
+  scrollbar-color: #d97706 rgba(59, 130, 246, 0.15);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #f59e0b 0%, #b45309 100%);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
 }

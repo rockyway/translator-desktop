@@ -18,6 +18,8 @@ export type ResolvedTheme = 'light' | 'dark';
 export type SelectionModifier = 'ctrl' | 'shift' | 'alt';
 /** Modifier key combination for global hotkey (Ctrl+Shift+Q, etc.) */
 export type HotkeyModifier = 'ctrl+shift' | 'ctrl+alt' | 'alt+shift';
+/** UI density preset affecting font size */
+export type DensityPreset = 'default' | 'large' | 'xlarge' | 'custom';
 
 export interface AppSettings {
   theme: Theme;
@@ -26,12 +28,16 @@ export interface AppSettings {
   sidebarCollapsed: boolean;
   selectionModifier: SelectionModifier; // Modifier key for text selection trigger
   hotkeyModifier: HotkeyModifier; // Modifier key combination for global hotkey
+  minimizeToTray: boolean; // Close button minimizes to system tray instead of exiting
+  density: DensityPreset; // UI density preset
+  customDensity: number; // Custom density percentage (used when density is 'custom')
 }
 
 export interface SettingsContextValue {
   settings: AppSettings;
   isLoading: boolean;
   resolvedTheme: ResolvedTheme;
+  densityPercentage: number;
   updateSetting: <K extends keyof AppSettings>(
     key: K,
     value: AppSettings[K]
@@ -50,7 +56,25 @@ const DEFAULT_SETTINGS: AppSettings = {
   sidebarCollapsed: false,
   selectionModifier: 'alt',
   hotkeyModifier: 'ctrl+shift',
+  minimizeToTray: true, // Default to minimize to tray on close
+  density: 'default',
+  customDensity: 100, // 100% by default
 };
+
+/** Maps density presets to font-size percentages */
+export const DENSITY_VALUES: Record<Exclude<DensityPreset, 'custom'>, number> = {
+  default: 100,
+  large: 110,
+  xlarge: 125,
+};
+
+/** Get the effective density percentage based on settings */
+export function getDensityPercentage(settings: AppSettings): number {
+  if (settings.density === 'custom') {
+    return settings.customDensity;
+  }
+  return DENSITY_VALUES[settings.density];
+}
 
 const DEBOUNCE_DELAY = 300;
 
@@ -62,6 +86,9 @@ const KEY_TO_BACKEND: Record<keyof AppSettings, string> = {
   sidebarCollapsed: 'sidebar_collapsed',
   selectionModifier: 'selection_modifier',
   hotkeyModifier: 'hotkey_modifier',
+  minimizeToTray: 'minimize_to_tray',
+  density: 'density',
+  customDensity: 'custom_density',
 };
 
 const BACKEND_TO_KEY: Record<string, keyof AppSettings> = {
@@ -71,6 +98,9 @@ const BACKEND_TO_KEY: Record<string, keyof AppSettings> = {
   sidebar_collapsed: 'sidebarCollapsed',
   selection_modifier: 'selectionModifier',
   hotkey_modifier: 'hotkeyModifier',
+  minimize_to_tray: 'minimizeToTray',
+  density: 'density',
+  custom_density: 'customDensity',
 };
 
 // ============================================================================
@@ -106,6 +136,12 @@ function applyThemeToDocument(resolved: ResolvedTheme): void {
   }
 }
 
+function applyDensityToDocument(percentage: number): void {
+  const root = document.documentElement;
+  root.style.setProperty('--density-scale', `${percentage / 100}`);
+  root.style.fontSize = `${percentage}%`;
+}
+
 /**
  * Parse settings from backend format to frontend format
  */
@@ -129,6 +165,8 @@ function parseBackendSettings(
         }
       } else if (frontendKey === 'sidebarCollapsed') {
         parsed.sidebarCollapsed = Boolean(value);
+      } else if (frontendKey === 'minimizeToTray') {
+        parsed.minimizeToTray = Boolean(value);
       } else if (frontendKey === 'selectionModifier') {
         const modifierValue = value as string;
         if (
@@ -152,6 +190,21 @@ function parseBackendSettings(
         frontendKey === 'targetLanguage'
       ) {
         parsed[frontendKey] = String(value);
+      } else if (frontendKey === 'density') {
+        const densityValue = value as string;
+        if (
+          densityValue === 'default' ||
+          densityValue === 'large' ||
+          densityValue === 'xlarge' ||
+          densityValue === 'custom'
+        ) {
+          parsed.density = densityValue;
+        }
+      } else if (frontendKey === 'customDensity') {
+        const numValue = Number(value);
+        if (!isNaN(numValue) && numValue >= 75 && numValue <= 200) {
+          parsed.customDensity = numValue;
+        }
       }
     }
   }
@@ -199,6 +252,10 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         setResolvedTheme(resolved);
         applyThemeToDocument(resolved);
 
+        // Apply density immediately
+        const densityPercent = getDensityPercentage(mergedSettings);
+        applyDensityToDocument(densityPercent);
+
         // Save any missing defaults to database so popup can read them
         const missingKeys: (keyof AppSettings)[] = [];
         for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof AppSettings)[]) {
@@ -226,6 +283,7 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         const resolved = resolveTheme(DEFAULT_SETTINGS.theme);
         setResolvedTheme(resolved);
         applyThemeToDocument(resolved);
+        applyDensityToDocument(getDensityPercentage(DEFAULT_SETTINGS));
         initialLoadComplete.current = true;
       } finally {
         setIsLoading(false);
@@ -305,6 +363,14 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         applyThemeToDocument(resolved);
       }
 
+      // Handle density changes immediately
+      if (key === 'density' || key === 'customDensity') {
+        // For density changes, we need to get the new settings object to calculate
+        const newSettings = { ...settings, [key]: value };
+        const newDensity = getDensityPercentage(newSettings as AppSettings);
+        applyDensityToDocument(newDensity);
+      }
+
       // Save to backend (debounced)
       saveSettingToBackend(key, value);
 
@@ -323,7 +389,7 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         }
       }
     },
-    [saveSettingToBackend]
+    [saveSettingToBackend, settings]
   );
 
   /**
@@ -341,6 +407,13 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         applyThemeToDocument(resolved);
       }
 
+      // Handle density changes immediately
+      if (updates.density !== undefined || updates.customDensity !== undefined) {
+        const newSettings = { ...settings, ...updates };
+        const newDensity = getDensityPercentage(newSettings as AppSettings);
+        applyDensityToDocument(newDensity);
+      }
+
       // Save each setting to backend (debounced)
       for (const [key, value] of Object.entries(updates)) {
         if (value !== undefined) {
@@ -351,13 +424,14 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         }
       }
     },
-    [saveSettingToBackend]
+    [saveSettingToBackend, settings]
   );
 
   const contextValue: SettingsContextValue = {
     settings,
     isLoading,
     resolvedTheme,
+    densityPercentage: getDensityPercentage(settings),
     updateSetting,
     updateSettings,
   };

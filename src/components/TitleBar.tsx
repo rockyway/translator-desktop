@@ -59,22 +59,34 @@ export function TitleBar() {
     handleMaximize();
   };
 
-  const handleDragStart = async () => {
-    try {
-      await invoke("start_drag_window");
-    } catch (error) {
-      console.error("Failed to start dragging window:", error);
-    }
-  };
-
   return (
     <div
-      className="fixed top-0 left-0 right-0 h-10 z-50 flex items-center justify-between select-none bg-transparent"
+      className="h-10 flex-shrink-0 z-50 flex items-center justify-between select-none bg-gray-50 dark:bg-gray-900"
       style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       onDoubleClick={handleDoubleClick}
     >
-      {/* Left side - App Title */}
-      <div className="flex items-center h-full px-4">
+      {/* Left side - App Icon and Title */}
+      <div className="flex items-center h-full px-3 gap-2.5">
+        {/* App Icon */}
+        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-amber-400 to-amber-600 shadow-sm flex-shrink-0">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-3.5 h-3.5 text-white"
+            aria-hidden="true"
+          >
+            <path d="M5 8l6 6" />
+            <path d="M4 14l6-6 2-3" />
+            <path d="M2 5h12" />
+            <path d="M7 2h1" />
+            <path d="M22 22l-5-10-5 10" />
+            <path d="M14 18h6" />
+          </svg>
+        </div>
         <h1 className="text-sm font-semibold text-gray-700 dark:text-gray-200 tracking-wide">
           Translator Desktop
         </h1>

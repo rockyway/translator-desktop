@@ -19,13 +19,52 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
 use std::fs;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 use tokio::sync::Mutex;
+
+// Global flag to track if app should truly exit (vs minimize to tray)
+static FORCE_EXIT: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// Exit the application completely (bypasses minimize to tray)
+#[tauri::command]
+async fn exit_app(app: tauri::AppHandle) {
+    FORCE_EXIT.store(true, Ordering::SeqCst);
+
+    // Stop the sidecar first
+    let sidecar_state = app.state::<SidecarState>();
+    if let Err(e) = sidecar_state.stop().await {
+        log::error!("Failed to stop sidecar on exit: {}", e);
+    }
+
+    app.exit(0);
+}
+
+/// Check if minimize_to_tray setting is enabled
+async fn get_minimize_to_tray_setting(app: &tauri::AppHandle) -> bool {
+    let db_state = app.try_state::<DbState>();
+    if let Some(db) = db_state {
+        let pool = db.0.lock().await;
+        sqlx::query_scalar::<_, String>(
+            "SELECT value FROM config_store WHERE key = 'minimize_to_tray'",
+        )
+        .fetch_optional(&*pool)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_str::<bool>(&v).ok())
+        .unwrap_or(true) // Default to true
+    } else {
+        true // Default to true if no database
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -67,13 +106,83 @@ pub fn run() {
             // Initialize hotkey state with default
             app.manage(HotkeyState::default());
 
-            // Apply Mica effect to main window (Windows 11)
+            // Apply Mica effect and set window icon (Windows 11)
             #[cfg(target_os = "windows")]
             {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window_vibrancy::apply_mica(&window, Some(true));
+
+                    // Set window icon for taskbar using embedded PNG
+                    let icon_bytes = include_bytes!("../icons/128x128.png");
+                    if let Ok(img) = image::load_from_memory(icon_bytes) {
+                        let rgba = img.to_rgba8();
+                        let (width, height) = rgba.dimensions();
+                        let icon = tauri::image::Image::new_owned(
+                            rgba.into_raw(),
+                            width,
+                            height,
+                        );
+                        let _ = window.set_icon(icon);
+                    }
                 }
             }
+
+            // Create system tray icon with context menu
+            let icon_bytes = include_bytes!("../icons/32x32.png");
+            let tray_icon = if let Ok(img) = image::load_from_memory(icon_bytes) {
+                let rgba = img.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                tauri::image::Image::new_owned(rgba.into_raw(), width, height)
+            } else {
+                // Fallback to empty icon if load fails
+                tauri::image::Image::new_owned(vec![0; 32 * 32 * 4], 32, 32)
+            };
+
+            // Create tray menu
+            let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+            let exit_item = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &exit_item])?;
+
+            // Build the tray icon
+            let _tray = TrayIconBuilder::new()
+                .icon(tray_icon)
+                .menu(&tray_menu)
+                .tooltip("Translator Desktop")
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "exit" => {
+                            FORCE_EXIT.store(true, Ordering::SeqCst);
+                            let app_clone = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                let sidecar_state = app_clone.state::<SidecarState>();
+                                let _ = sidecar_state.stop().await;
+                                app_clone.exit(0);
+                            });
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
 
             // Set up Ctrl+C handler for graceful shutdown
             let app_handle_ctrlc = app.handle().clone();
@@ -243,14 +352,34 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Stop sidecar when main window is closed
+            // Handle close request for main window
             if window.label() == "main" {
-                if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // Check if force exit is requested (from Exit button or tray menu)
+                    if FORCE_EXIT.load(Ordering::SeqCst) {
+                        // Allow the close, sidecar cleanup happens in exit_app or tray handler
+                        return;
+                    }
+
+                    // Check minimize_to_tray setting
                     let app_handle = window.app_handle().clone();
+                    let window_clone = window.clone();
+
+                    // Prevent the default close behavior
+                    api.prevent_close();
+
                     tauri::async_runtime::spawn(async move {
-                        let sidecar_state = app_handle.state::<SidecarState>();
-                        if let Err(e) = sidecar_state.stop().await {
-                            log::error!("Failed to stop text monitor sidecar: {}", e);
+                        let minimize_to_tray = get_minimize_to_tray_setting(&app_handle).await;
+
+                        if minimize_to_tray {
+                            // Hide window to tray instead of closing
+                            let _ = window_clone.hide();
+                        } else {
+                            // Actually close the app
+                            FORCE_EXIT.store(true, Ordering::SeqCst);
+                            let sidecar_state = app_handle.state::<SidecarState>();
+                            let _ = sidecar_state.stop().await;
+                            app_handle.exit(0);
                         }
                     });
                 }
@@ -287,7 +416,8 @@ pub fn run() {
             toggle_maximize_window,
             close_window,
             is_window_maximized,
-            start_drag_window
+            start_drag_window,
+            exit_app
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

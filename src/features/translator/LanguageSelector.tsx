@@ -17,6 +17,10 @@ interface LanguageSelectorProps {
   disabled?: boolean;
   /** Optional sublabel to display inline with the label (e.g., "Detected: English") */
   sublabel?: string;
+  /** Additional CSS classes for the container */
+  className?: string;
+  /** Hide the internal label (useful when label is rendered externally) */
+  hideLabel?: boolean;
 }
 
 /**
@@ -31,6 +35,8 @@ export function LanguageSelector({
   id,
   disabled = false,
   sublabel,
+  className = '',
+  hideLabel = false,
 }: LanguageSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -198,19 +204,21 @@ export function LanguageSelector({
   const listboxId = `${id}-listbox`;
 
   return (
-    <div ref={containerRef} className="relative" onKeyDown={handleKeyDown}>
+    <div ref={containerRef} className={`relative ${className}`} onKeyDown={handleKeyDown}>
       {/* Label */}
-      <label
-        htmlFor={id}
-        className="flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-      >
-        <span>{label}</span>
-        {sublabel && (
-          <span className="text-sm text-amber-600 dark:text-amber-400 font-medium ml-2">
-            {sublabel}
-          </span>
-        )}
-      </label>
+      {!hideLabel && (
+        <label
+          htmlFor={id}
+          className="flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+        >
+          <span>{label}</span>
+          {sublabel && (
+            <span className="text-sm text-amber-600 dark:text-amber-400 font-medium ml-2">
+              {sublabel}
+            </span>
+          )}
+        </label>
+      )}
 
       {/* Trigger Button */}
       <button

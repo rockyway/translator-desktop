@@ -21,6 +21,7 @@ pub struct HistoryEntry {
     pub source_language: String,
     pub target_language: String,
     pub detected_language: Option<String>,
+    pub metadata: Option<String>,
     pub created_at: String,
 }
 
@@ -33,6 +34,7 @@ pub struct AddHistoryInput {
     pub source_language: String,
     pub target_language: String,
     pub detected_language: Option<String>,
+    pub metadata: Option<String>,
 }
 
 /// Pagination result for history queries
@@ -104,6 +106,19 @@ pub async fn init_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Migration: Add metadata column if not exists
+    let column_exists: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('history') WHERE name = 'metadata'"
+    )
+    .fetch_one(pool)
+    .await?;
+
+    if !column_exists {
+        sqlx::query("ALTER TABLE history ADD COLUMN metadata TEXT")
+            .execute(pool)
+            .await?;
+    }
+
     // Create indexes for faster queries
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_history_source_text ON history(source_text);")
         .execute(pool)
@@ -153,8 +168,8 @@ pub async fn add_history(
 
     let result = sqlx::query(
         r#"
-        INSERT INTO history (source_text, translated_text, source_language, target_language, detected_language)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO history (source_text, translated_text, source_language, target_language, detected_language, metadata)
+        VALUES (?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&input.source_text)
@@ -162,6 +177,7 @@ pub async fn add_history(
     .bind(&input.source_language)
     .bind(&input.target_language)
     .bind(&input.detected_language)
+    .bind(&input.metadata)
     .execute(&*pool)
     .await
     .map_err(|e| HistoryError::DatabaseError(e.to_string()))?;
@@ -199,7 +215,7 @@ pub async fn get_history(
     // Get paginated entries
     let entries: Vec<HistoryEntry> = sqlx::query_as(
         r#"
-        SELECT id, source_text, translated_text, source_language, target_language, detected_language, created_at
+        SELECT id, source_text, translated_text, source_language, target_language, detected_language, metadata, created_at
         FROM history
         ORDER BY created_at DESC
         LIMIT ? OFFSET ?
@@ -315,7 +331,7 @@ pub async fn search_history(
     // Get paginated search results
     let entries: Vec<HistoryEntry> = sqlx::query_as(
         r#"
-        SELECT id, source_text, translated_text, source_language, target_language, detected_language, created_at
+        SELECT id, source_text, translated_text, source_language, target_language, detected_language, metadata, created_at
         FROM history
         WHERE source_text LIKE ? ESCAPE '\' OR translated_text LIKE ? ESCAPE '\'
         ORDER BY created_at DESC
@@ -350,6 +366,7 @@ mod tests {
             source_language: "vi".to_string(),
             target_language: "en".to_string(),
             detected_language: None,
+            metadata: None,
         };
 
         // Validation would fail
@@ -364,6 +381,7 @@ mod tests {
             source_language: "vi".to_string(),
             target_language: "en".to_string(),
             detected_language: None,
+            metadata: None,
         };
 
         // Validation would fail

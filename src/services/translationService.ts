@@ -1,6 +1,62 @@
 import { invoke } from '@tauri-apps/api/core';
 
 /**
+ * Alternative translation for a word
+ */
+export interface AlternativeTranslation {
+  word: string;
+}
+
+/**
+ * Definition entry with gloss and optional example
+ */
+export interface DefinitionEntry {
+  gloss: string;
+  example?: string;
+}
+
+/**
+ * Definition group with part of speech
+ */
+export interface Definition {
+  partOfSpeech: string;
+  entries: DefinitionEntry[];
+}
+
+/**
+ * Example sentence
+ */
+export interface TranslationExample {
+  text: string;
+}
+
+/**
+ * Synonym entry
+ */
+export interface Synonym {
+  word: string;
+}
+
+/**
+ * Related word entry
+ */
+export interface RelatedWord {
+  word: string;
+}
+
+/**
+ * Translation metadata containing examples, definitions, alternatives, synonyms, related words, and transliteration
+ */
+export interface TranslationMetadata {
+  examples: TranslationExample[];
+  definitions: Definition[];
+  alternatives: AlternativeTranslation[];
+  synonyms: Synonym[];
+  relatedWords: RelatedWord[];
+  transliteration?: string;
+}
+
+/**
  * Result of a translation request
  */
 export interface TranslationResult {
@@ -10,6 +66,8 @@ export interface TranslationResult {
   detectedLanguage?: string;
   /** Pronunciation guide for the translated text (if available) */
   pronunciation?: string;
+  /** Translation metadata (examples, definitions, alternatives) */
+  metadata?: TranslationMetadata;
 }
 
 /**
@@ -65,6 +123,7 @@ export class TTSError extends Error {
 interface TauriTranslateResponse {
   translatedText: string;
   detectedLanguage?: string;
+  metadata?: TranslationMetadata;
 }
 
 
@@ -106,6 +165,7 @@ export async function translateText(
       translatedText: result.translatedText,
       detectedLanguage: result.detectedLanguage,
       pronunciation: undefined,
+      metadata: result.metadata,
     };
   } catch (error) {
     // Handle Tauri command errors

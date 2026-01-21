@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { TranslationMetadata } from '../services/translationService';
 
 /**
  * Represents a single translation history entry
@@ -20,6 +21,8 @@ export interface HistoryEntry {
   detectedLanguage?: string;
   /** Timestamp when the translation was saved (ISO string) */
   createdAt: string;
+  /** Translation metadata as JSON string stored in database */
+  metadata?: string;
 }
 
 /**

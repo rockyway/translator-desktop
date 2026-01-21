@@ -5,6 +5,7 @@ import {
   translateText,
   TranslationResult,
   TranslationError,
+  TranslationMetadata,
 } from '../services/translationService';
 
 /**
@@ -29,6 +30,8 @@ export interface UseTranslationReturn {
   translatedText: string;
   /** The detected source language (if auto-detect was used) */
   detectedLanguage?: string;
+  /** Translation metadata (examples, definitions, alternatives) */
+  metadata?: TranslationMetadata;
   /** Whether a translation is in progress */
   isLoading: boolean;
   /** Error object if translation failed */
@@ -113,6 +116,7 @@ export function useTranslation(
             sourceLanguage: sourceLanguage,
             targetLanguage: targetLanguage,
             detectedLanguage: mutation.data.detectedLanguage,
+            metadata: mutation.data.metadata ? JSON.stringify(mutation.data.metadata) : undefined,
           }
         });
       } catch (error) {
@@ -182,6 +186,7 @@ export function useTranslation(
     translate,
     translatedText: mutation.data?.translatedText ?? '',
     detectedLanguage: mutation.data?.detectedLanguage,
+    metadata: mutation.data?.metadata,
     isLoading: mutation.isPending,
     error: mutation.error ?? null,
     reset,

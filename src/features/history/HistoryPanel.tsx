@@ -126,7 +126,7 @@ function HistoryCard({
       {/* Content: Source and translated text */}
       <div
         className={`p-4 ${onSelect ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50' : ''}`}
-        onClick={() => onSelect?.(entry.sourceText, sourceLang, entry.targetLanguage)}
+        onClick={() => onSelect?.(entry.sourceText, entry.translatedText, sourceLang, entry.targetLanguage)}
         role={onSelect ? 'button' : undefined}
         tabIndex={onSelect ? 0 : undefined}
         onKeyDown={(e) => {
