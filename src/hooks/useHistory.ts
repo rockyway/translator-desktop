@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { TranslationMetadata } from '../services/translationService';
 
 /**
  * Represents a single translation history entry

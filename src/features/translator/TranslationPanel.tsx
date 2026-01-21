@@ -319,22 +319,22 @@ export function TranslationPanel({
               />
 
               {/* Input Footer */}
-              <div className="flex items-center justify-between pt-3 border-t border-amber-200 dark:border-amber-700/50">
-                <div className="flex items-center gap-1">
+              <div className="flex items-center justify-between pt-2 border-t border-amber-200 dark:border-amber-700/50">
+                <div className="flex items-center gap-0.5">
                   <button
                     type="button"
                     onClick={handleTranslate}
                     disabled={!inputText.trim()}
                     aria-label="Translate text"
                     title="Translate"
-                    className={`p-2.5 rounded-lg transition-all
-                      focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800
+                    className={`p-1.5 rounded-md transition-all
+                      focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
                       ${inputText.trim()
                         ? 'text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30'
                         : 'text-amber-300 dark:text-amber-700 cursor-not-allowed'
                       }`}
                   >
-                    <FiArrowRight className="w-5 h-5" aria-hidden="true" />
+                    <FiArrowRight className="w-4 h-4" aria-hidden="true" />
                   </button>
 
                   <button
@@ -343,20 +343,20 @@ export function TranslationPanel({
                     disabled={!inputText.trim()}
                     aria-label="Listen to input text"
                     title="Listen"
-                    className={`p-2.5 rounded-lg transition-all
-                      focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800
+                    className={`p-1.5 rounded-md transition-all
+                      focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
                       ${inputText.trim()
                         ? 'text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30'
                         : 'text-amber-300 dark:text-amber-700 cursor-not-allowed'
                       }`}
                   >
-                    <FiVolume2 className="w-5 h-5" aria-hidden="true" />
+                    <FiVolume2 className="w-4 h-4" aria-hidden="true" />
                   </button>
                 </div>
 
                 <span
                   id="char-count"
-                  className={`text-sm font-medium ${
+                  className={`text-xs font-medium ${
                     charCount > maxChars * 0.9
                       ? 'text-red-500 dark:text-red-400'
                       : 'text-amber-600 dark:text-amber-400'
@@ -480,21 +480,21 @@ export function TranslationPanel({
               </div>
 
               {/* Output Footer */}
-              <div className="flex items-center justify-end gap-1 pt-3 border-t border-blue-200 dark:border-blue-700/50">
+              <div className="flex items-center justify-end gap-0.5 pt-2 border-t border-blue-200 dark:border-blue-700/50">
                 <button
                   type="button"
                   onClick={handleListenOutput}
                   disabled={!translatedText}
                   aria-label="Listen to translated text"
                   title="Listen"
-                  className={`p-2.5 rounded-lg transition-all
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800
+                  className={`p-1.5 rounded-md transition-all
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
                     ${translatedText
                       ? 'text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30'
                       : 'text-blue-300 dark:text-blue-700 cursor-not-allowed'
                     }`}
                 >
-                  <FiVolume2 className="w-5 h-5" aria-hidden="true" />
+                  <FiVolume2 className="w-4 h-4" aria-hidden="true" />
                 </button>
 
                 <button
@@ -503,8 +503,8 @@ export function TranslationPanel({
                   disabled={!translatedText}
                   aria-label={copySuccess ? 'Copied!' : 'Copy translated text'}
                   title={copySuccess ? 'Copied!' : 'Copy'}
-                  className={`p-2.5 rounded-lg transition-all
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800
+                  className={`p-1.5 rounded-md transition-all
+                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
                     ${translatedText
                       ? copySuccess
                         ? 'bg-green-500 text-white'
@@ -512,7 +512,7 @@ export function TranslationPanel({
                       : 'text-blue-300 dark:text-blue-700 cursor-not-allowed'
                     }`}
                 >
-                  <FiCopy className="w-5 h-5" aria-hidden="true" />
+                  <FiCopy className="w-4 h-4" aria-hidden="true" />
                 </button>
               </div>
             </div>

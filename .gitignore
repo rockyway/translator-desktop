@@ -26,6 +26,10 @@ dist-ssr
 # Tauri
 src-tauri/target/
 src-tauri/binaries/
+src-tauri/text-monitor-x86_64-pc-windows-msvc.exe
+
+# TypeScript
+tsconfig.tsbuildinfo
 
 # .NET build output
 text-monitor/**/bin/

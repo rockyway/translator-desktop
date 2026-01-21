@@ -246,6 +246,16 @@ public class TextSelectionMonitor : ITextSelectionMonitor, IDisposable
                         return;
                     }
 
+                    // CRITICAL: Verify modifier key is STILL pressed at mouse release
+                    // User must hold modifier key throughout the entire selection
+                    if (!IsModifierKeyPressed())
+                    {
+                        _logger.LogDebug("Modifier key released before mouse button - cancelling selection");
+                        _cursorTracker.CancelSelection();
+                        _stateMachine.Reset("Modifier key released early");
+                        return;
+                    }
+
                     var coordinates = _cursorTracker.EndSelection(e);
                     if (coordinates == null)
                     {

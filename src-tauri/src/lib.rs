@@ -92,6 +92,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // Initialize job object to ensure child processes terminate with parent

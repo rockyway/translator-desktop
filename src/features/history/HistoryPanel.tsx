@@ -11,12 +11,12 @@ import {
   FiRefreshCw,
 } from 'react-icons/fi';
 import { useHistory, HistoryEntry } from '../../hooks/useHistory';
-import { getLanguageByCode } from '../../services/translationService';
+import { getLanguageByCode, TranslationMetadata } from '../../services/translationService';
 
 interface HistoryPanelProps {
   className?: string;
   /** Callback when user wants to use a history entry for new translation */
-  onSelectEntry?: (sourceText: string, translatedText: string, sourceLang: string, targetLang: string) => void;
+  onSelectEntry?: (sourceText: string, translatedText: string, sourceLang: string, targetLang: string, metadata?: TranslationMetadata) => void;
 }
 
 /**
@@ -77,10 +77,23 @@ function HistoryCard({
 }: {
   entry: HistoryEntry;
   onDelete: (id: number) => void;
-  onSelect?: (sourceText: string, translatedText: string, sourceLang: string, targetLang: string) => void;
+  onSelect?: (sourceText: string, translatedText: string, sourceLang: string, targetLang: string, metadata?: TranslationMetadata) => void;
   isDeleting: boolean;
 }) {
   const sourceLang = entry.detectedLanguage ?? entry.sourceLanguage ?? 'auto';
+
+  // Parse metadata from JSON string if available
+  const parsedMetadata = entry.metadata ? (() => {
+    try {
+      return JSON.parse(entry.metadata) as TranslationMetadata;
+    } catch {
+      return undefined;
+    }
+  })() : undefined;
+
+  const handleSelect = () => {
+    onSelect?.(entry.sourceText, entry.translatedText, sourceLang, entry.targetLanguage, parsedMetadata);
+  };
 
   return (
     <div
@@ -126,13 +139,13 @@ function HistoryCard({
       {/* Content: Source and translated text */}
       <div
         className={`p-4 ${onSelect ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50' : ''}`}
-        onClick={() => onSelect?.(entry.sourceText, entry.translatedText, sourceLang, entry.targetLanguage)}
+        onClick={handleSelect}
         role={onSelect ? 'button' : undefined}
         tabIndex={onSelect ? 0 : undefined}
         onKeyDown={(e) => {
           if (onSelect && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault();
-            onSelect(entry.sourceText, entry.translatedText, sourceLang, entry.targetLanguage);
+            handleSelect();
           }
         }}
       >

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import { useSettings } from "./hooks/useSettings";
 import { Sidebar, SidebarTab } from "./components/Sidebar";
+import { UpdateNotification } from "./components/UpdateNotification";
 import { TitleBar } from "./components/TitleBar";
 import { StatusBar } from "./components/StatusBar";
 import { TranslationPanel } from "./features/translator/TranslationPanel";
@@ -67,12 +68,13 @@ function AppContent() {
   }, []);
 
   // Handle selecting a history entry to translate
-  const handleSelectHistoryEntry = useCallback((sourceText: string, translatedText: string, sourceLang: string, targetLang: string) => {
+  const handleSelectHistoryEntry = useCallback((sourceText: string, translatedText: string, sourceLang: string, targetLang: string, metadata?: TranslationMetadata) => {
     setInitialContent({
       text: sourceText,
       translatedText,
       sourceLang,
       targetLang,
+      metadata,
       contentKey: Date.now(),
     });
     setActiveTab('translate');
@@ -98,25 +100,18 @@ function AppContent() {
           onToggleCollapse={handleToggleCollapse}
         />
 
-        {/* Main Content Area - Scrollable content contained here */}
-        <main
-          className="flex-1 overflow-y-auto custom-scrollbar"
-        >
-          <div className="p-6 min-h-full">
-            <div className="max-w-6xl mx-auto">
-              {/* Panel Content */}
-              <div
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 border border-gray-200 dark:border-gray-700"
-                role="tabpanel"
-                aria-label={
-                  activeTab === 'translate'
-                    ? 'Translation panel'
-                    : activeTab === 'history'
-                      ? 'History panel'
-                      : 'Settings panel'
-                }
-              >
-                {activeTab === 'translate' && (
+        {/* Main Content Area - Each panel has its own scroll container */}
+        <main className="flex-1 relative min-h-0">
+          {/* Translation Panel */}
+          <div
+            className={`absolute inset-0 overflow-y-auto custom-scrollbar ${activeTab !== 'translate' ? 'hidden' : ''}`}
+            role="tabpanel"
+            aria-label="Translation panel"
+            aria-hidden={activeTab !== 'translate'}
+          >
+            <div className="p-6 min-h-full">
+              <div className="max-w-6xl mx-auto">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 border border-gray-200 dark:border-gray-700">
                   <TranslationPanel
                     key={initialContent?.contentKey ?? 'default'}
                     initialText={initialContent?.text}
@@ -125,13 +120,39 @@ function AppContent() {
                     initialTargetLang={initialContent?.targetLang}
                     initialMetadata={initialContent?.metadata}
                   />
-                )}
-                {activeTab === 'history' && (
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* History Panel */}
+          <div
+            className={`absolute inset-0 overflow-y-auto custom-scrollbar ${activeTab !== 'history' ? 'hidden' : ''}`}
+            role="tabpanel"
+            aria-label="History panel"
+            aria-hidden={activeTab !== 'history'}
+          >
+            <div className="p-6 min-h-full">
+              <div className="max-w-6xl mx-auto">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 border border-gray-200 dark:border-gray-700">
                   <HistoryPanel onSelectEntry={handleSelectHistoryEntry} />
-                )}
-                {activeTab === 'settings' && (
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Settings Panel */}
+          <div
+            className={`absolute inset-0 overflow-y-auto custom-scrollbar ${activeTab !== 'settings' ? 'hidden' : ''}`}
+            role="tabpanel"
+            aria-label="Settings panel"
+            aria-hidden={activeTab !== 'settings'}
+          >
+            <div className="p-6 min-h-full">
+              <div className="max-w-6xl mx-auto">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 border border-gray-200 dark:border-gray-700">
                   <SettingsPanel />
-                )}
+                </div>
               </div>
             </div>
           </div>
@@ -143,6 +164,9 @@ function AppContent() {
         isConnected={isConnected}
         textMonitorVersion={textMonitorVersion}
       />
+
+      {/* Update Notification - Fixed position overlay */}
+      <UpdateNotification />
     </div>
   );
 }

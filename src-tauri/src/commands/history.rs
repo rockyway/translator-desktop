@@ -144,7 +144,7 @@ pub async fn init_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 /// * `input` - The history entry data to add
 ///
 /// # Returns
-/// * The ID of the newly created history entry
+/// * The ID of the newly created history entry, or -1 if skipped (duplicate)
 #[tauri::command]
 pub async fn add_history(
     db_state: State<'_, DbState>,
@@ -165,6 +165,21 @@ pub async fn add_history(
     }
 
     let pool = db_state.0.lock().await;
+
+    // Check if the last entry has the same source text to avoid duplicates in series
+    let last_source: Option<String> = sqlx::query_scalar(
+        "SELECT source_text FROM history ORDER BY id DESC LIMIT 1"
+    )
+    .fetch_optional(&*pool)
+    .await
+    .map_err(|e| HistoryError::DatabaseError(e.to_string()))?;
+
+    if let Some(last) = last_source {
+        if last == input.source_text {
+            // Skip saving duplicate - return -1 to indicate skipped
+            return Ok(-1);
+        }
+    }
 
     let result = sqlx::query(
         r#"
