@@ -17,6 +17,10 @@ interface HistoryPanelProps {
   className?: string;
   /** Callback when user wants to use a history entry for new translation */
   onSelectEntry?: (sourceText: string, translatedText: string, sourceLang: string, targetLang: string, metadata?: TranslationMetadata) => void;
+  /** Whether this panel is currently visible (for auto-refresh on tab switch) */
+  isVisible?: boolean;
+  /** Ref to the scroll container for preserving scroll position */
+  scrollContainerRef?: React.RefObject<HTMLDivElement>;
 }
 
 /**
@@ -300,7 +304,7 @@ function ClearConfirmDialog({
  * - Pagination support for large history
  * - Click on entry to use it for new translation
  */
-export function HistoryPanel({ className = '', onSelectEntry }: HistoryPanelProps) {
+export function HistoryPanel({ className = '', onSelectEntry, isVisible = true, scrollContainerRef }: HistoryPanelProps) {
   const {
     entries,
     total,
@@ -324,6 +328,32 @@ export function HistoryPanel({ className = '', onSelectEntry }: HistoryPanelProp
   const [isClearing, setIsClearing] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Track previous visibility to detect tab switches
+  const wasVisibleRef = useRef(isVisible);
+
+  // Refetch when panel becomes visible (tab switch) while preserving scroll position
+  useEffect(() => {
+    const becameVisible = isVisible && !wasVisibleRef.current;
+    wasVisibleRef.current = isVisible;
+
+    if (becameVisible) {
+      // Save scroll position before refetch
+      const scrollTop = scrollContainerRef?.current?.scrollTop ?? 0;
+
+      refetch().then(() => {
+        // Restore scroll position after data loads
+        if (scrollContainerRef?.current && scrollTop > 0) {
+          // Use requestAnimationFrame to ensure DOM has updated
+          requestAnimationFrame(() => {
+            if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTop = scrollTop;
+            }
+          });
+        }
+      });
+    }
+  }, [isVisible, refetch, scrollContainerRef]);
 
   // Debounced search
   useEffect(() => {

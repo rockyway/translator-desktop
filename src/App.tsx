@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import { useSettings } from "./hooks/useSettings";
@@ -46,6 +46,9 @@ function AppContent() {
 
   const [activeTab, setActiveTab] = useState<SidebarTab>('translate');
   const [initialContent, setInitialContent] = useState<InitialContent | null>(null);
+
+  // Ref for history panel scroll container (for preserving scroll position on refetch)
+  const historyScrollRef = useRef<HTMLDivElement>(null);
 
   // Listen for content transfer from popup (already translated)
   useEffect(() => {
@@ -127,6 +130,7 @@ function AppContent() {
 
           {/* History Panel */}
           <div
+            ref={historyScrollRef}
             className={`absolute inset-0 overflow-y-auto custom-scrollbar ${activeTab !== 'history' ? 'hidden' : ''}`}
             role="tabpanel"
             aria-label="History panel"
@@ -135,7 +139,11 @@ function AppContent() {
             <div className="p-6 min-h-full">
               <div className="max-w-6xl mx-auto">
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 md:p-8 border border-gray-200 dark:border-gray-700">
-                  <HistoryPanel onSelectEntry={handleSelectHistoryEntry} />
+                  <HistoryPanel
+                    onSelectEntry={handleSelectHistoryEntry}
+                    isVisible={activeTab === 'history'}
+                    scrollContainerRef={historyScrollRef}
+                  />
                 </div>
               </div>
             </div>

@@ -77,6 +77,9 @@ export function useTranslation(
   // Store the latest text to translate
   const [pendingText, setPendingText] = useState<string>('');
 
+  // Track the text that was last successfully translated (to match with mutation result)
+  const lastTranslatedTextRef = useRef<string>('');
+
   // Debounce timeout ref
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -95,38 +98,33 @@ export function useTranslation(
         to: targetLanguage,
       });
     },
-  });
+    onSuccess: async (data, sourceText) => {
+      // Save to history using the sourceText from the mutation call (captured at mutation time)
+      // This prevents the race condition where pendingText changes before translation completes
+      lastTranslatedTextRef.current = sourceText;
 
-  // Extract stable references from mutation
-  const { reset: resetMutation, mutate } = mutation;
+      if (!sourceText.trim()) return;
 
-  // Auto-save translation to history on successful translation
-  useEffect(() => {
-    if (!mutation.data || !pendingText.trim()) {
-      return;
-    }
-
-    // Save to history after successful translation
-    const saveToHistory = async () => {
       try {
         await invoke('add_history', {
           input: {
-            sourceText: pendingText,
-            translatedText: mutation.data.translatedText,
+            sourceText: sourceText,
+            translatedText: data.translatedText,
             sourceLanguage: sourceLanguage,
             targetLanguage: targetLanguage,
-            detectedLanguage: mutation.data.detectedLanguage,
-            metadata: mutation.data.metadata ? JSON.stringify(mutation.data.metadata) : undefined,
+            detectedLanguage: data.detectedLanguage,
+            metadata: data.metadata ? JSON.stringify(data.metadata) : undefined,
           }
         });
       } catch (error) {
         // Silently log error - don't break the translation flow
         console.error('Failed to save translation to history:', error);
       }
-    };
+    },
+  });
 
-    saveToHistory();
-  }, [mutation.data, pendingText, sourceLanguage, targetLanguage]);
+  // Extract stable references from mutation
+  const { reset: resetMutation, mutate } = mutation;
 
   // Cleanup on unmount
   useEffect(() => {
