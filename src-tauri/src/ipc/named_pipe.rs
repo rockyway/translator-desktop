@@ -4,9 +4,14 @@ use crate::commands::PopupTextState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
+
+/// Global flag to track IPC connection status.
+/// This allows querying the connection state without relying on event listeners.
+static IPC_CONNECTED: AtomicBool = AtomicBool::new(false);
 
 /// Pipe name matching the .NET server.
 const PIPE_NAME: &str = r"\\.\pipe\TranslatorDesktop";
@@ -148,8 +153,11 @@ fn connect_and_listen(app_handle: &AppHandle) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-/// Emits a connection status event to the frontend.
+/// Emits a connection status event to the frontend and updates global state.
 fn emit_connection_status(app_handle: &AppHandle, connected: bool) {
+    // Update global connection state
+    IPC_CONNECTED.store(connected, Ordering::SeqCst);
+
     let event = ConnectionStatusEvent {
         connected,
         timestamp: Utc::now().to_rfc3339(),
@@ -162,6 +170,12 @@ fn emit_connection_status(app_handle: &AppHandle, connected: bool) {
     if let Err(e) = app_handle.emit(event_name, event) {
         log::error!("IPC: Failed to emit {} event: {}", event_name, e);
     }
+}
+
+/// Returns the current IPC connection status.
+/// This can be called at any time to check if the named pipe is connected.
+pub fn is_ipc_connected() -> bool {
+    IPC_CONNECTED.load(Ordering::SeqCst)
 }
 
 /// Handles an incoming IPC message and emits appropriate Tauri events.

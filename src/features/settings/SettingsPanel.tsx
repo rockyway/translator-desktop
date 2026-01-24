@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { FiCheck, FiMoon, FiSun, FiMonitor, FiType } from 'react-icons/fi';
+import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../../hooks/useSettings';
 import type { Theme, SelectionModifier, HotkeyModifier, DensityPreset } from '../../contexts/SettingsContext';
 import { DENSITY_VALUES } from '../../contexts/SettingsContext';
@@ -207,7 +208,7 @@ function ThemeSelector({ value, onChange }: ThemeSelectorProps) {
               dark:focus:ring-offset-gray-800
               ${
                 isSelected
-                  ? 'bg-amber-500 text-white shadow-md'
+                  ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white shadow-md'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
               }
             `}
@@ -247,7 +248,7 @@ function ToggleSwitch({ checked, onChange, label }: ToggleSwitchProps) {
         transition-colors duration-200 ease-in-out
         focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2
         dark:focus:ring-offset-gray-800
-        ${checked ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}
+        ${checked ? 'bg-gradient-to-r from-amber-600 to-amber-700' : 'bg-gray-300 dark:bg-gray-600'}
       `}
     >
       <span
@@ -291,7 +292,7 @@ function SelectionModifierSelector({ value, onChange }: SelectionModifierSelecto
               dark:focus:ring-offset-gray-800
               ${
                 isSelected
-                  ? 'bg-amber-500 text-white shadow-md'
+                  ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white shadow-md'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
               }
             `}
@@ -332,7 +333,7 @@ function HotkeyModifierSelector({ value, onChange }: HotkeyModifierSelectorProps
               dark:focus:ring-offset-gray-800
               ${
                 isSelected
-                  ? 'bg-amber-500 text-white shadow-md'
+                  ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white shadow-md'
                   : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
               }
             `}
@@ -382,7 +383,7 @@ function DensitySelector({
                 dark:focus:ring-offset-gray-800
                 ${
                   isSelected
-                    ? 'bg-amber-500 text-white shadow-md'
+                    ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white shadow-md'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                 }
               `}
@@ -425,7 +426,7 @@ function DensitySelector({
                 [&::-webkit-slider-thumb]:w-5
                 [&::-webkit-slider-thumb]:h-5
                 [&::-webkit-slider-thumb]:rounded-full
-                [&::-webkit-slider-thumb]:bg-amber-500
+                [&::-webkit-slider-thumb]:bg-amber-600
                 [&::-webkit-slider-thumb]:shadow-md
                 [&::-webkit-slider-thumb]:cursor-pointer
                 [&::-webkit-slider-thumb]:transition-transform
@@ -433,7 +434,7 @@ function DensitySelector({
                 [&::-moz-range-thumb]:w-5
                 [&::-moz-range-thumb]:h-5
                 [&::-moz-range-thumb]:rounded-full
-                [&::-moz-range-thumb]:bg-amber-500
+                [&::-moz-range-thumb]:bg-amber-600
                 [&::-moz-range-thumb]:border-0
                 [&::-moz-range-thumb]:shadow-md
                 [&::-moz-range-thumb]:cursor-pointer"
@@ -501,6 +502,23 @@ interface SettingsPanelProps {
 export function SettingsPanel({ className = '' }: SettingsPanelProps) {
   const { settings, updateSetting, isLoading } = useSettings();
   const [showSaved, setShowSaved] = useState(false);
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false);
+  const [autoStartLoading, setAutoStartLoading] = useState(true);
+
+  // Load auto-start status on mount
+  useEffect(() => {
+    async function loadAutoStartStatus() {
+      try {
+        const enabled = await invoke<boolean>('is_autostart_enabled');
+        setAutoStartEnabled(enabled);
+      } catch (error) {
+        console.error('Failed to get auto-start status:', error);
+      } finally {
+        setAutoStartLoading(false);
+      }
+    }
+    loadAutoStartStatus();
+  }, []);
 
   /**
    * Show the saved indicator briefly after any setting change
@@ -568,6 +586,19 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
       flashSavedIndicator();
     },
     [updateSetting, flashSavedIndicator]
+  );
+
+  const handleAutoStartChange = useCallback(
+    async (enabled: boolean) => {
+      try {
+        await invoke('set_autostart_enabled', { enabled });
+        setAutoStartEnabled(enabled);
+        flashSavedIndicator();
+      } catch (error) {
+        console.error('Failed to set auto-start:', error);
+      }
+    },
+    [flashSavedIndicator]
   );
 
   // Loading state
@@ -664,6 +695,20 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
             onChange={handleMinimizeToTrayChange}
             label="Minimize to system tray on close"
           />
+        </SettingRow>
+        <SettingRow
+          label="Start with system"
+          description="Automatically launch the app when you log in"
+        >
+          {autoStartLoading ? (
+            <div className="w-11 h-6 bg-gray-200 dark:bg-gray-700 rounded-full animate-pulse" />
+          ) : (
+            <ToggleSwitch
+              checked={autoStartEnabled}
+              onChange={handleAutoStartChange}
+              label="Start with system"
+            />
+          )}
         </SettingRow>
       </SettingSection>
 

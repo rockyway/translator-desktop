@@ -47,7 +47,7 @@ export function UpdateNotification() {
   if (!available) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 bg-gradient-to-r from-amber-500 to-amber-600 text-black p-4 rounded-xl shadow-2xl max-w-sm animate-in slide-in-from-bottom-4">
+    <div className="fixed bottom-4 right-4 z-50 bg-gradient-to-r from-amber-600 to-amber-700 text-white p-4 rounded-xl shadow-2xl max-w-sm animate-in slide-in-from-bottom-4">
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -69,7 +69,7 @@ export function UpdateNotification() {
         {!downloading && (
           <button
             onClick={dismissUpdate}
-            className="text-black/60 hover:text-black transition-colors"
+            className="text-white/60 hover:text-white transition-colors"
             aria-label="Dismiss"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -86,7 +86,7 @@ export function UpdateNotification() {
 
       {/* Release notes (truncated) */}
       {body && (
-        <div className="mt-2 text-xs text-black/70 line-clamp-2">
+        <div className="mt-2 text-xs text-white/70 line-clamp-2">
           {body}
         </div>
       )}
@@ -100,7 +100,7 @@ export function UpdateNotification() {
               style={{ width: `${progress}%` }}
             />
           </div>
-          <div className="flex justify-between text-xs mt-1 text-black/70">
+          <div className="flex justify-between text-xs mt-1 text-white/70">
             <span>Downloading...</span>
             <span>
               {formatBytes(downloaded)} / {formatBytes(total)}

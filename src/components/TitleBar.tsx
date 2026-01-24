@@ -68,7 +68,7 @@ export function TitleBar() {
       {/* Left side - App Icon and Title */}
       <div className="flex items-center h-full px-3 gap-2.5">
         {/* App Icon */}
-        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-amber-400 to-amber-600 shadow-sm flex-shrink-0">
+        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-amber-600 to-amber-700 shadow-sm flex-shrink-0">
           <svg
             viewBox="0 0 24 24"
             fill="none"

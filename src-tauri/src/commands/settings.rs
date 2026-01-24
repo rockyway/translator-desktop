@@ -9,6 +9,7 @@ use sqlx::{FromRow, Row, SqlitePool};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 use tokio::sync::Mutex;
 
@@ -248,6 +249,41 @@ pub async fn get_all_settings(
     }
 
     Ok(settings)
+}
+
+/// Check if auto-start is enabled
+///
+/// # Returns
+/// * true if the app is set to start automatically with the system
+#[tauri::command]
+pub fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    let autostart = app.autolaunch();
+    autostart
+        .is_enabled()
+        .map_err(|e| format!("Failed to check autostart status: {}", e))
+}
+
+/// Enable or disable auto-start
+///
+/// # Arguments
+/// * `enabled` - Whether to enable or disable auto-start
+#[tauri::command]
+pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let autostart = app.autolaunch();
+
+    if enabled {
+        autostart
+            .enable()
+            .map_err(|e| format!("Failed to enable autostart: {}", e))?;
+        log::info!("Auto-start enabled");
+    } else {
+        autostart
+            .disable()
+            .map_err(|e| format!("Failed to disable autostart: {}", e))?;
+        log::info!("Auto-start disabled");
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

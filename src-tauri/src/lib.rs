@@ -7,13 +7,14 @@ mod sidecar;
 use commands::{
     add_history, apply_acrylic_effect, apply_mica_effect, clear_history, close_window,
     delete_history, get_all_settings, get_history, get_popup_text, get_setting,
-    handle_global_hotkey, hide_popup, init_config_store, init_database, is_popup_visible,
-    is_window_maximized, minimize_window, resize_popup, search_history, set_popup_text,
-    set_setting, show_popup, simulate_copy, speak, start_drag_window, toggle_maximize_window,
-    translate, trigger_hotkey_translate, update_global_hotkey, update_selection_modifier,
-    DbState, HotkeyState, PopupTextState,
+    handle_global_hotkey, hide_popup, init_config_store, init_database, is_autostart_enabled,
+    is_popup_visible, is_window_maximized, minimize_window, resize_popup, search_history,
+    set_autostart_enabled, set_popup_text, set_setting, show_popup, simulate_copy, speak,
+    start_drag_window, toggle_maximize_window, translate, trigger_hotkey_translate,
+    update_global_hotkey, update_selection_modifier, DbState, HotkeyState, HttpClientState,
+    PopupTextState,
 };
-use ipc::start_ipc_listener;
+use ipc::{is_ipc_connected, start_ipc_listener};
 use sidecar::{init_job_object, is_text_monitor_running, start_text_monitor, stop_text_monitor, SidecarState};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
@@ -32,6 +33,13 @@ static FORCE_EXIT: AtomicBool = AtomicBool::new(false);
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+/// Get the current IPC connection status.
+/// This allows the frontend to query the connection state on initialization.
+#[tauri::command]
+fn get_ipc_status() -> bool {
+    is_ipc_connected()
 }
 
 /// Exit the application completely (bypasses minimize to tray)
@@ -93,6 +101,10 @@ pub fn run() {
         )
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimized"]), // Start minimized when auto-launched
+        ))
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // Initialize job object to ensure child processes terminate with parent
@@ -106,6 +118,10 @@ pub fn run() {
 
             // Initialize hotkey state with default
             app.manage(HotkeyState::default());
+
+            // Initialize shared HTTP client for translation requests
+            // Creating once avoids TLS/connection pool setup on first request
+            app.manage(HttpClientState::default());
 
             // Apply Mica effect and set window icon (Windows 11)
             #[cfg(target_os = "windows")]
@@ -406,6 +422,7 @@ pub fn run() {
             start_text_monitor,
             stop_text_monitor,
             is_text_monitor_running,
+            get_ipc_status,
             get_setting,
             set_setting,
             get_all_settings,
@@ -418,7 +435,9 @@ pub fn run() {
             close_window,
             is_window_maximized,
             start_drag_window,
-            exit_app
+            exit_app,
+            is_autostart_enabled,
+            set_autostart_enabled
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

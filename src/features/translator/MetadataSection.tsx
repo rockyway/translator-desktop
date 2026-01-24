@@ -5,7 +5,6 @@ import {
   FiList,
   FiLayers,
   FiLink,
-  FiType,
   FiMessageCircle,
 } from 'react-icons/fi';
 import type { TranslationMetadata } from '../../services/translationService';
@@ -283,7 +282,7 @@ function DefinitionsSection({
                     {entry.gloss}
                   </p>
                   {entry.example && (
-                    <p className="text-gray-500 dark:text-gray-400 text-xs italic pl-2 border-l-2 border-blue-200 dark:border-blue-700">
+                    <p className="text-gray-500 dark:text-gray-400 text-sm italic pl-2 border-l-2 border-blue-200 dark:border-blue-700">
                       "{entry.example}"
                     </p>
                   )}
@@ -319,33 +318,10 @@ function WordListSection({
 }
 
 /**
- * TransliterationSection - Displays transliteration in monospace
- */
-function TransliterationSection({
-  transliteration,
-}: {
-  transliteration: string;
-}) {
-  return (
-    <div
-      className={`
-        px-4 py-3 rounded-lg
-        bg-slate-100 dark:bg-slate-800/60
-        border border-slate-200 dark:border-slate-700
-      `}
-    >
-      <p className="font-mono text-sm text-gray-700 dark:text-gray-200 tracking-wide">
-        {transliteration}
-      </p>
-    </div>
-  );
-}
-
-/**
  * MetadataSection - Displays translation metadata in collapsible cards
  *
- * Shows examples, definitions, alternatives, synonyms, related words,
- * and transliteration in a visually appealing, organized format.
+ * Shows examples, definitions, alternatives, synonyms, and related words
+ * in a visually appealing, organized format.
  */
 export function MetadataSection({
   metadata,
@@ -368,8 +344,6 @@ export function MetadataSection({
   const hasSynonyms = metadata.synonyms && metadata.synonyms.length > 0;
   const hasRelatedWords =
     metadata.relatedWords && metadata.relatedWords.length > 0;
-  const hasTransliteration =
-    metadata.transliteration && metadata.transliteration.trim() !== '';
 
   // If no data at all, don't render
   if (
@@ -377,8 +351,7 @@ export function MetadataSection({
     !hasDefinitions &&
     !hasAlternatives &&
     !hasSynonyms &&
-    !hasRelatedWords &&
-    !hasTransliteration
+    !hasRelatedWords
   ) {
     return null;
   }
@@ -396,19 +369,6 @@ export function MetadataSection({
 
       {/* Collapsible Cards */}
       <div className="grid gap-3">
-        {/* Examples - Expanded by default */}
-        {hasExamples && (
-          <CollapsibleCard
-            title="Examples"
-            icon={<FiMessageCircle className="w-4 h-4" />}
-            accentColor="amber"
-            defaultExpanded={true}
-            badge={metadata.examples.length}
-          >
-            <ExamplesSection examples={metadata.examples} />
-          </CollapsibleCard>
-        )}
-
         {/* Definitions */}
         {hasDefinitions && (
           <CollapsibleCard
@@ -422,6 +382,19 @@ export function MetadataSection({
             )}
           >
             <DefinitionsSection definitions={metadata.definitions} />
+          </CollapsibleCard>
+        )}
+
+        {/* Examples */}
+        {hasExamples && (
+          <CollapsibleCard
+            title="Examples"
+            icon={<FiMessageCircle className="w-4 h-4" />}
+            accentColor="amber"
+            defaultExpanded={true}
+            badge={metadata.examples.length}
+          >
+            <ExamplesSection examples={metadata.examples} />
           </CollapsibleCard>
         )}
 
@@ -466,20 +439,6 @@ export function MetadataSection({
             <WordListSection
               words={metadata.relatedWords}
               accentColor="indigo"
-            />
-          </CollapsibleCard>
-        )}
-
-        {/* Transliteration */}
-        {hasTransliteration && (
-          <CollapsibleCard
-            title="Transliteration"
-            icon={<FiType className="w-4 h-4" />}
-            accentColor="slate"
-            defaultExpanded={true}
-          >
-            <TransliterationSection
-              transliteration={metadata.transliteration!}
             />
           </CollapsibleCard>
         )}

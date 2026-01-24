@@ -5,6 +5,24 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tauri::State;
+
+/// Shared HTTP client state for reuse across requests
+/// Creating a client is expensive (TLS setup, connection pooling)
+/// so we reuse it for all translation requests
+pub struct HttpClientState(pub Arc<Client>);
+
+impl Default for HttpClientState {
+    fn default() -> Self {
+        Self(Arc::new(
+            Client::builder()
+                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                .build()
+                .expect("Failed to create HTTP client"),
+        ))
+    }
+}
 
 /// Maximum allowed text length for translation (5000 characters)
 const MAX_TEXT_LENGTH: usize = 5000;
@@ -112,6 +130,7 @@ impl Serialize for TranslateError {
 /// * `text` - The text to translate
 /// * `from` - Source language code (use "auto" for auto-detection)
 /// * `to` - Target language code
+/// * `http_client` - Shared HTTP client state
 ///
 /// # Returns
 /// * `TranslateResult` containing the translated text and detected language
@@ -120,6 +139,7 @@ pub async fn translate(
     text: String,
     from: String,
     to: String,
+    http_client: State<'_, HttpClientState>,
 ) -> Result<TranslateResult, TranslateError> {
     // Validate input
     let text = text.trim();
@@ -154,11 +174,9 @@ pub async fn translate(
         urlencoding::encode(text)
     );
 
-    // Make the request
-    let client = Client::new();
-    let response = client
+    // Make the request using shared client
+    let response = http_client.0
         .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         .send()
         .await?;
 

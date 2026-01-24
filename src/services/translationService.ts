@@ -272,42 +272,47 @@ export async function playTextToSpeech(
 
 /**
  * List of commonly used languages for the translation UI
- * Includes Auto Detect option for source language selection
+ * Sorted alphabetically by name, with Auto Detect at the top for source selection
  */
-const SUPPORTED_LANGUAGES: LanguageOption[] = [
-  { code: 'auto', name: 'Auto Detect' },
-  { code: 'en', name: 'English' },
-  { code: 'es', name: 'Spanish' },
-  { code: 'fr', name: 'French' },
-  { code: 'de', name: 'German' },
-  { code: 'it', name: 'Italian' },
-  { code: 'pt', name: 'Portuguese' },
-  { code: 'ru', name: 'Russian' },
-  { code: 'ja', name: 'Japanese' },
-  { code: 'ko', name: 'Korean' },
+const LANGUAGES_SORTED: LanguageOption[] = [
+  { code: 'ar', name: 'Arabic' },
+  { code: 'bg', name: 'Bulgarian' },
   { code: 'zh-CN', name: 'Chinese (Simplified)' },
   { code: 'zh-TW', name: 'Chinese (Traditional)' },
-  { code: 'ar', name: 'Arabic' },
-  { code: 'hi', name: 'Hindi' },
-  { code: 'vi', name: 'Vietnamese' },
-  { code: 'th', name: 'Thai' },
-  { code: 'id', name: 'Indonesian' },
-  { code: 'ms', name: 'Malay' },
+  { code: 'cs', name: 'Czech' },
+  { code: 'da', name: 'Danish' },
   { code: 'nl', name: 'Dutch' },
-  { code: 'pl', name: 'Polish' },
-  { code: 'tr', name: 'Turkish' },
-  { code: 'uk', name: 'Ukrainian' },
+  { code: 'en', name: 'English' },
+  { code: 'fi', name: 'Finnish' },
+  { code: 'fr', name: 'French' },
+  { code: 'de', name: 'German' },
   { code: 'el', name: 'Greek' },
   { code: 'he', name: 'Hebrew' },
-  { code: 'sv', name: 'Swedish' },
-  { code: 'da', name: 'Danish' },
-  { code: 'fi', name: 'Finnish' },
-  { code: 'no', name: 'Norwegian' },
-  { code: 'cs', name: 'Czech' },
-  { code: 'ro', name: 'Romanian' },
+  { code: 'hi', name: 'Hindi' },
   { code: 'hu', name: 'Hungarian' },
-  { code: 'bg', name: 'Bulgarian' },
+  { code: 'id', name: 'Indonesian' },
+  { code: 'it', name: 'Italian' },
+  { code: 'ja', name: 'Japanese' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'ms', name: 'Malay' },
+  { code: 'no', name: 'Norwegian' },
+  { code: 'pl', name: 'Polish' },
+  { code: 'pt', name: 'Portuguese' },
+  { code: 'ro', name: 'Romanian' },
+  { code: 'ru', name: 'Russian' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'sv', name: 'Swedish' },
+  { code: 'th', name: 'Thai' },
+  { code: 'tr', name: 'Turkish' },
+  { code: 'uk', name: 'Ukrainian' },
+  { code: 'vi', name: 'Vietnamese' },
 ];
+
+/** Auto Detect option for source language */
+const AUTO_DETECT: LanguageOption = { code: 'auto', name: 'Auto Detect' };
+
+/** Full list with Auto Detect at top */
+const SUPPORTED_LANGUAGES: LanguageOption[] = [AUTO_DETECT, ...LANGUAGES_SORTED];
 
 /**
  * Returns the list of supported languages for the translation UI
@@ -327,10 +332,10 @@ export function getSupportedLanguages(): LanguageOption[] {
 /**
  * Returns the list of target languages (excludes 'auto' option)
  *
- * @returns Array of language options available as target languages
+ * @returns Array of language options available as target languages (sorted alphabetically)
  */
 export function getTargetLanguages(): LanguageOption[] {
-  return SUPPORTED_LANGUAGES.filter((lang) => lang.code !== 'auto');
+  return LANGUAGES_SORTED;
 }
 
 /**

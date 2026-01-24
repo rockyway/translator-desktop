@@ -109,6 +109,7 @@ pub fn init_job_object() {
 #[cfg(target_os = "windows")]
 fn kill_existing_text_monitor() {
     use std::process::Command;
+    use std::os::windows::process::CommandExt;
 
     // Kill both possible naming conventions
     let names = [
@@ -116,9 +117,13 @@ fn kill_existing_text_monitor() {
         "text-monitor.exe",
     ];
 
+    // CREATE_NO_WINDOW flag to prevent console window from appearing
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
     for name in names {
         let result = Command::new("taskkill")
             .args(["/F", "/IM", name])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
 
         if let Ok(output) = result {

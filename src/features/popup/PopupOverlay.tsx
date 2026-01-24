@@ -15,13 +15,13 @@ import { useTheme } from '../../hooks/useTheme';
 // Fixed heights for popup elements (in pixels)
 const TITLE_BAR_HEIGHT = 32;
 const FOOTER_HEIGHT = 44;
-const CONTENT_PADDING = 24; // Extra padding for safety
+const CONTENT_PADDING = 32; // Extra padding for safety
 const SECTION_LABEL_HEIGHT = 24; // Language label height
 const DIVIDER_HEIGHT = 12; // border + margin
 const LINE_HEIGHT = 21; // ~text-sm leading-relaxed
-const MIN_LINES = 3; // Minimum lines to show for each section
-const MIN_POPUP_HEIGHT = TITLE_BAR_HEIGHT + (SECTION_LABEL_HEIGHT + LINE_HEIGHT * MIN_LINES) * 2 + DIVIDER_HEIGHT + FOOTER_HEIGHT + CONTENT_PADDING; // ~220px
-const MAX_POPUP_HEIGHT = 500;
+const MIN_LINES = 4; // Minimum lines to show for each section
+const MIN_POPUP_HEIGHT = TITLE_BAR_HEIGHT + (SECTION_LABEL_HEIGHT + LINE_HEIGHT * MIN_LINES) * 2 + DIVIDER_HEIGHT + FOOTER_HEIGHT + CONTENT_PADDING; // ~280px
+const MAX_POPUP_HEIGHT = 550;
 
 /**
  * Props for the PopupOverlay component
@@ -79,16 +79,22 @@ function LanguageDropdown({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="appearance-none bg-transparent text-sm font-medium text-blue-600 dark:text-blue-400
-          cursor-pointer focus:outline-none pr-5"
+        className="appearance-none bg-gray-100 dark:bg-gray-800 text-sm font-medium
+          text-blue-600 dark:text-blue-400 rounded-md px-2 py-1 pr-7
+          border border-gray-200 dark:border-gray-700
+          cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/50
+          hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors
+          [&>option]:bg-white [&>option]:dark:bg-gray-800
+          [&>option]:text-gray-900 [&>option]:dark:text-gray-100
+          [&>option]:py-2"
       >
         {languages.map((lang) => (
-          <option key={lang.code} value={lang.code} className="text-gray-900">
+          <option key={lang.code} value={lang.code}>
             {lang.name}
           </option>
         ))}
       </select>
-      <FiChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none text-blue-600 dark:text-blue-400" />
+      <FiChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none text-blue-600 dark:text-blue-400" />
     </div>
   );
 }
@@ -200,6 +206,11 @@ export function PopupOverlay({
         targetSectionHeight +
         FOOTER_HEIGHT +
         CONTENT_PADDING;
+
+      // Add extra space for transliteration if present
+      if (metadata?.transliteration) {
+        totalHeight += 20; // Space for pronunciation line
+      }
 
       // Add extra space for definitions if present (compact inline layout)
       if (metadata?.definitions && metadata.definitions.length > 0) {
@@ -364,13 +375,19 @@ export function PopupOverlay({
                 <FiVolume2 className={`w-4 h-4 ${isPlayingSource ? 'animate-pulse' : ''}`} aria-hidden="true" />
               </button>
             </div>
-            <div className="max-h-24 overflow-y-auto mt-0.5">
+            <div className="max-h-24 overflow-y-auto mt-0.5 custom-scrollbar">
               <p
                 ref={sourceTextRef}
                 className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap"
               >
                 {text}
               </p>
+              {/* Pronunciation/Transliteration for source text */}
+              {metadata?.transliteration && (
+                <p className="mt-0.5 text-xs text-amber-500 dark:text-amber-400 font-mono italic">
+                  {metadata.transliteration}
+                </p>
+              )}
             </div>
           </div>
 
@@ -401,7 +418,7 @@ export function PopupOverlay({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto mt-0.5">
+            <div className="flex-1 overflow-y-auto mt-0.5 custom-scrollbar">
               {/* Loading State */}
               {isLoading && (
                 <div className="flex items-center gap-2 text-blue-500 dark:text-blue-400">
@@ -451,8 +468,8 @@ export function PopupOverlay({
                   {metadata?.definitions && metadata.definitions.length > 0 && (
                     <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                       {metadata.definitions.slice(0, 2).map((def, idx) => (
-                        <div key={idx} className="text-xs text-gray-600 dark:text-gray-400">
-                          <span className="inline-block px-1 py-0.5 rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-medium mr-1.5">
+                        <div key={idx} className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+                          <span className="inline-block px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-600 dark:text-blue-400 text-xs font-medium mr-2">
                             {def.partOfSpeech}
                           </span>
                           {def.entries[0]?.gloss}

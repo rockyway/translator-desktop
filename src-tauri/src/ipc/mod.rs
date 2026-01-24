@@ -8,4 +8,4 @@ mod config_pipe;
 mod named_pipe;
 
 pub use config_pipe::{send_config, ConfigMessage};
-pub use named_pipe::start_ipc_listener;
+pub use named_pipe::{is_ipc_connected, start_ipc_listener};

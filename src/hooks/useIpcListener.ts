@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 /** Payload structure for text-selected events from the IPC bridge */
@@ -52,6 +53,16 @@ export function useIpcListener(): UseIpcListenerResult {
 
     const setupListeners = async () => {
       try {
+        // Query initial IPC connection status from backend
+        // This ensures correct status display even after page refresh
+        try {
+          const initialStatus = await invoke<boolean>("get_ipc_status");
+          console.log("Initial IPC status:", initialStatus);
+          setIsConnected(initialStatus);
+        } catch (error) {
+          console.warn("Failed to get initial IPC status:", error);
+        }
+
         // Listen for text-selected events
         unlistenTextSelected = await listen<TextSelectedPayload>(
           "text-selected",

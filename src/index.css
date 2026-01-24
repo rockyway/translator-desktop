@@ -12,16 +12,16 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* Theme scrollbar colors */
-  --scrollbar-track: rgba(59, 130, 246, 0.1);
-  --scrollbar-thumb: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
-  --scrollbar-thumb-hover: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+  /* Theme scrollbar colors - darker amber for better contrast */
+  --scrollbar-track: rgba(180, 83, 9, 0.1);
+  --scrollbar-thumb: linear-gradient(180deg, #d97706 0%, #b45309 100%);
+  --scrollbar-thumb-hover: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
 }
 
 .dark {
-  --scrollbar-track: rgba(59, 130, 246, 0.15);
-  --scrollbar-thumb: linear-gradient(180deg, #f59e0b 0%, #b45309 100%);
-  --scrollbar-thumb-hover: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
+  --scrollbar-track: rgba(180, 83, 9, 0.15);
+  --scrollbar-thumb: linear-gradient(180deg, #b45309 0%, #92400e 100%);
+  --scrollbar-thumb-hover: linear-gradient(180deg, #d97706 0%, #b45309 100%);
 }
 
 body {
@@ -37,10 +37,10 @@ body {
   overflow: hidden;
 }
 
-/* Custom Scrollbar Styles - Gold/Blue Theme */
+/* Custom Scrollbar Styles - Gold/Amber Theme */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #f59e0b rgba(59, 130, 246, 0.1);
+  scrollbar-color: #d97706 rgba(180, 83, 9, 0.1);
 }
 
 /* Webkit browsers (Chrome, Safari, Edge) */
@@ -74,17 +74,17 @@ body {
 
 /* Dark mode scrollbar adjustments */
 .dark .custom-scrollbar {
-  scrollbar-color: #d97706 rgba(59, 130, 246, 0.15);
+  scrollbar-color: #b45309 rgba(180, 83, 9, 0.15);
 }
 
 .dark .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(59, 130, 246, 0.15);
+  background: rgba(180, 83, 9, 0.15);
 }
 
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #f59e0b 0%, #b45309 100%);
+  background: linear-gradient(180deg, #b45309 0%, #92400e 100%);
 }
 
 .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
+  background: linear-gradient(180deg, #d97706 0%, #b45309 100%);
 }

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
-import { FiVolume2, FiCopy, FiRepeat, FiAlertCircle, FiRefreshCw, FiArrowRight } from 'react-icons/fi';
+import { FiVolume2, FiCopy, FiRepeat, FiAlertCircle, FiRefreshCw, FiArrowRight, FiRotateCcw } from 'react-icons/fi';
 import { LanguageSelector } from './LanguageSelector';
 import { MetadataSection } from './MetadataSection';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -76,17 +76,36 @@ export function TranslationPanel({
   initialMetadata,
 }: TranslationPanelProps) {
   // Settings context for persisting language preferences
-  const { settings, updateSetting } = useSettings();
+  const { settings, updateSetting, isLoading: settingsLoading } = useSettings();
 
-  // Language state - use props if provided, otherwise use settings, finally fallback to defaults
+  // Language state - use props if provided, otherwise use defaults (will sync with settings once loaded)
   const [sourceLanguage, setSourceLanguage] = useState(() => {
     if (initialSourceLang) return initialSourceLang;
-    return settings.sourceLanguage || 'auto';
+    return 'auto';
   });
   const [targetLanguage, setTargetLanguage] = useState(() => {
     if (initialTargetLang) return initialTargetLang;
-    return settings.targetLanguage || getDefaultTargetLanguage();
+    return getDefaultTargetLanguage();
   });
+
+  // Track if initial settings have been applied
+  const hasAppliedSettingsRef = useRef(false);
+
+  // Sync language state with settings once they finish loading from database
+  useEffect(() => {
+    // Only apply once, when settings finish loading and no initial props were provided
+    if (!settingsLoading && !hasAppliedSettingsRef.current) {
+      hasAppliedSettingsRef.current = true;
+
+      // Only update if not overridden by props
+      if (!initialSourceLang && settings.sourceLanguage) {
+        setSourceLanguage(settings.sourceLanguage);
+      }
+      if (!initialTargetLang && settings.targetLanguage) {
+        setTargetLanguage(settings.targetLanguage);
+      }
+    }
+  }, [settingsLoading, settings.sourceLanguage, settings.targetLanguage, initialSourceLang, initialTargetLang]);
 
   // Copy success feedback
   const [copySuccess, setCopySuccess] = useState(false);
@@ -204,6 +223,13 @@ export function TranslationPanel({
     }
   }, [sourceLanguage, targetLanguage, detectedLanguage, translatedText, setValue, updateSetting]);
 
+  // Handle clear input text
+  const handleClearInput = useCallback(() => {
+    setValue('inputText', '');
+    setPreTranslatedText(undefined);
+    setDisplayedMetadata(undefined);
+  }, [setValue]);
+
   // Handle listen (text-to-speech) for input
   const handleListenInput = useCallback(async () => {
     if (!inputText.trim()) return;
@@ -309,17 +335,25 @@ export function TranslationPanel({
                 id="input-text"
                 {...register('inputText')}
                 onKeyDown={handleKeyDown}
-                placeholder="Enter text to translate..."
+                placeholder="Enter text for translation… (Ctrl+Enter to proceed)"
                 aria-label="Text to translate"
                 aria-describedby="char-count"
                 className="w-full min-h-[100px] resize-none bg-transparent
-                  text-gray-900 dark:text-gray-100 placeholder-amber-400 dark:placeholder-amber-500
+                  text-gray-900 dark:text-gray-100 placeholder:text-sm placeholder:text-amber-400 dark:placeholder:text-amber-500
                   focus:outline-none text-lg leading-relaxed"
                 maxLength={maxChars}
               />
 
+              {/* Pronunciation/Transliteration for source text */}
+              {displayedMetadata?.transliteration && (
+                <p className="mt-1 text-sm text-amber-600 dark:text-amber-400 font-mono italic">
+                  {displayedMetadata.transliteration}
+                </p>
+              )}
+
               {/* Input Footer */}
               <div className="flex items-center justify-between pt-2 border-t border-amber-200 dark:border-amber-700/50">
+                {/* Left: Translate + Play Sound */}
                 <div className="flex items-center gap-0.5">
                   <button
                     type="button"
@@ -354,6 +388,24 @@ export function TranslationPanel({
                   </button>
                 </div>
 
+                {/* Center: Clear */}
+                <button
+                  type="button"
+                  onClick={handleClearInput}
+                  disabled={!inputText.trim()}
+                  aria-label="Clear input text"
+                  title="Clear"
+                  className={`p-1.5 rounded-md transition-all
+                    focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
+                    ${inputText.trim()
+                      ? 'text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30'
+                      : 'text-amber-300 dark:text-amber-700 cursor-not-allowed'
+                    }`}
+                >
+                  <FiRotateCcw className="w-4 h-4" aria-hidden="true" />
+                </button>
+
+                {/* Right: Character Count */}
                 <span
                   id="char-count"
                   className={`text-xs font-medium ${
@@ -379,7 +431,7 @@ export function TranslationPanel({
             className={`p-4 rounded-full transition-all shadow-lg
               focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800
               ${canSwap
-                ? 'bg-gradient-to-r from-amber-500 to-blue-500 text-white hover:from-amber-600 hover:to-blue-600 hover:shadow-xl cursor-pointer'
+                ? 'bg-gradient-to-r from-amber-600 to-blue-600 text-white hover:from-amber-700 hover:to-blue-700 hover:shadow-xl cursor-pointer'
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
               }`}
           >

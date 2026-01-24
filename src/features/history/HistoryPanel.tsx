@@ -156,9 +156,6 @@ function HistoryCard({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Source text */}
           <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
-              Original
-            </p>
             <p className="text-gray-900 dark:text-gray-100 leading-relaxed">
               {truncateText(entry.sourceText, 200)}
             </p>
@@ -166,9 +163,6 @@ function HistoryCard({
 
           {/* Translated text */}
           <div>
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
-              Translation
-            </p>
             <p className="text-gray-900 dark:text-gray-100 leading-relaxed">
               {truncateText(entry.translatedText, 200)}
             </p>
