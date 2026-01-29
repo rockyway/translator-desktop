@@ -42,6 +42,39 @@ fn parse_modifiers(modifier: &str) -> Result<Modifiers, String> {
     }
 }
 
+/// Parse letter (a-z) to Tauri Code enum.
+fn parse_letter_to_code(letter: &str) -> Result<Code, String> {
+    match letter.to_lowercase().as_str() {
+        "a" => Ok(Code::KeyA),
+        "b" => Ok(Code::KeyB),
+        "c" => Ok(Code::KeyC),
+        "d" => Ok(Code::KeyD),
+        "e" => Ok(Code::KeyE),
+        "f" => Ok(Code::KeyF),
+        "g" => Ok(Code::KeyG),
+        "h" => Ok(Code::KeyH),
+        "i" => Ok(Code::KeyI),
+        "j" => Ok(Code::KeyJ),
+        "k" => Ok(Code::KeyK),
+        "l" => Ok(Code::KeyL),
+        "m" => Ok(Code::KeyM),
+        "n" => Ok(Code::KeyN),
+        "o" => Ok(Code::KeyO),
+        "p" => Ok(Code::KeyP),
+        "q" => Ok(Code::KeyQ),
+        "r" => Ok(Code::KeyR),
+        "s" => Ok(Code::KeyS),
+        "t" => Ok(Code::KeyT),
+        "u" => Ok(Code::KeyU),
+        "v" => Ok(Code::KeyV),
+        "w" => Ok(Code::KeyW),
+        "x" => Ok(Code::KeyX),
+        "y" => Ok(Code::KeyY),
+        "z" => Ok(Code::KeyZ),
+        _ => Err(format!("Invalid letter: {}. Must be A-Z.", letter)),
+    }
+}
+
 /// Updates the global hotkey modifier at runtime.
 /// Unregisters the old shortcut and registers the new one.
 #[tauri::command]
@@ -49,8 +82,10 @@ pub async fn update_global_hotkey(
     app: AppHandle,
     hotkey_state: State<'_, HotkeyState>,
     modifier: String,
+    letter: String,
 ) -> Result<(), String> {
     let modifiers = parse_modifiers(&modifier)?;
+    let code = parse_letter_to_code(&letter)?;
 
     let mut current = hotkey_state.0.lock().await;
 
@@ -61,16 +96,28 @@ pub async fn update_global_hotkey(
     }
 
     // Create and register new shortcut
-    let new_shortcut = Shortcut::new(Some(modifiers), Code::KeyQ);
-    app.global_shortcut()
-        .register(new_shortcut)
-        .map_err(|e| format!("Failed to register new shortcut {}+Q: {}", modifier, e))?;
-
-    // Update state
-    *current = new_shortcut;
-
-    log::info!("Global hotkey updated to: {}+Q", modifier);
-    Ok(())
+    let new_shortcut = Shortcut::new(Some(modifiers), code);
+    match app.global_shortcut().register(new_shortcut) {
+        Ok(_) => {
+            // Update state on success
+            *current = new_shortcut;
+            log::info!(
+                "Global hotkey updated to: {}+{}",
+                modifier,
+                letter.to_uppercase()
+            );
+            Ok(())
+        }
+        Err(_e) => {
+            // Fallback: re-register old hotkey
+            let _ = app.global_shortcut().register(*current);
+            Err(format!(
+                "Failed to register {}+{}. Key may be in use by another app.",
+                modifier,
+                letter.to_uppercase()
+            ))
+        }
+    }
 }
 
 /// Updates the selection modifier in the .NET Text Monitor.
@@ -284,6 +331,26 @@ pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), String
     }
 
     Ok(())
+}
+
+/// Get character limit setting from database (0 = disabled)
+///
+/// # Arguments
+/// * `db_state` - The database state
+///
+/// # Returns
+/// * The character limit value (default: 100)
+pub async fn get_char_limit_setting(db_state: &DbState) -> usize {
+    let pool = db_state.0.lock().await;
+    sqlx::query_scalar::<_, String>(
+        "SELECT value FROM config_store WHERE key = 'confirmation_char_limit'"
+    )
+    .fetch_optional(&*pool)
+    .await
+    .ok()
+    .flatten()
+    .and_then(|v| serde_json::from_str::<usize>(&v).ok())
+    .unwrap_or(100)
 }
 
 #[cfg(test)]

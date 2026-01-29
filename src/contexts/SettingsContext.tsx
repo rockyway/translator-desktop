@@ -28,9 +28,11 @@ export interface AppSettings {
   sidebarCollapsed: boolean;
   selectionModifier: SelectionModifier; // Modifier key for text selection trigger
   hotkeyModifier: HotkeyModifier; // Modifier key combination for global hotkey
+  hotkeyLetter: string; // Single letter (a-z) for global hotkey
   minimizeToTray: boolean; // Close button minimizes to system tray instead of exiting
   density: DensityPreset; // UI density preset
   customDensity: number; // Custom density percentage (used when density is 'custom')
+  confirmationCharLimit: number; // Character limit for showing confirmation dialog (0 = disabled)
 }
 
 export interface SettingsContextValue {
@@ -38,6 +40,7 @@ export interface SettingsContextValue {
   isLoading: boolean;
   resolvedTheme: ResolvedTheme;
   densityPercentage: number;
+  hotkeyError: string | null;
   updateSetting: <K extends keyof AppSettings>(
     key: K,
     value: AppSettings[K]
@@ -56,9 +59,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   sidebarCollapsed: false,
   selectionModifier: 'alt',
   hotkeyModifier: 'ctrl+shift',
+  hotkeyLetter: 'q',
   minimizeToTray: true, // Default to minimize to tray on close
   density: 'default',
   customDensity: 100, // 100% by default
+  confirmationCharLimit: 100, // Default 100 characters
 };
 
 /** Maps density presets to font-size percentages */
@@ -86,9 +91,11 @@ const KEY_TO_BACKEND: Record<keyof AppSettings, string> = {
   sidebarCollapsed: 'sidebar_collapsed',
   selectionModifier: 'selection_modifier',
   hotkeyModifier: 'hotkey_modifier',
+  hotkeyLetter: 'hotkey_letter',
   minimizeToTray: 'minimize_to_tray',
   density: 'density',
   customDensity: 'custom_density',
+  confirmationCharLimit: 'confirmation_char_limit',
 };
 
 const BACKEND_TO_KEY: Record<string, keyof AppSettings> = {
@@ -98,9 +105,11 @@ const BACKEND_TO_KEY: Record<string, keyof AppSettings> = {
   sidebar_collapsed: 'sidebarCollapsed',
   selection_modifier: 'selectionModifier',
   hotkey_modifier: 'hotkeyModifier',
+  hotkey_letter: 'hotkeyLetter',
   minimize_to_tray: 'minimizeToTray',
   density: 'density',
   custom_density: 'customDensity',
+  confirmation_char_limit: 'confirmationCharLimit',
 };
 
 // ============================================================================
@@ -205,6 +214,16 @@ function parseBackendSettings(
         if (!isNaN(numValue) && numValue >= 75 && numValue <= 200) {
           parsed.customDensity = numValue;
         }
+      } else if (frontendKey === 'confirmationCharLimit') {
+        const numValue = Number(value);
+        if (!isNaN(numValue) && numValue >= 0) {
+          parsed.confirmationCharLimit = numValue;
+        }
+      } else if (frontendKey === 'hotkeyLetter') {
+        const letterValue = String(value).toLowerCase();
+        if (/^[a-z]$/.test(letterValue)) {
+          parsed.hotkeyLetter = letterValue;
+        }
       }
     }
   }
@@ -226,6 +245,7 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(() =>
     resolveTheme(DEFAULT_SETTINGS.theme)
   );
+  const [hotkeyError, setHotkeyError] = useState<string | null>(null);
 
   // Track pending saves for debouncing
   const pendingSavesRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
@@ -381,11 +401,21 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         } catch (error) {
           console.error('Failed to update selection modifier:', error);
         }
-      } else if (key === 'hotkeyModifier') {
+      } else if (key === 'hotkeyModifier' || key === 'hotkeyLetter') {
         try {
-          await invoke('update_global_hotkey', { modifier: value });
+          const modifier =
+            key === 'hotkeyModifier' ? (value as string) : settings.hotkeyModifier;
+          const letter =
+            key === 'hotkeyLetter' ? (value as string) : settings.hotkeyLetter;
+          await invoke('update_global_hotkey', { modifier, letter });
+          setHotkeyError(null); // Clear error on success
         } catch (error) {
-          console.error('Failed to update global hotkey:', error);
+          const errorMsg = String(error);
+          console.error('Failed to update global hotkey:', errorMsg);
+          setHotkeyError(errorMsg);
+
+          // Revert to previous value
+          setSettings(prev => ({ ...prev, [key]: prev[key] }));
         }
       }
     },
@@ -432,6 +462,7 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
     isLoading,
     resolvedTheme,
     densityPercentage: getDensityPercentage(settings),
+    hotkeyError,
     updateSetting,
     updateSettings,
   };

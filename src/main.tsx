@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./index.css";
 import App from "./App.tsx";
 import { PopupWindow } from "./features/popup/PopupWindow.tsx";
+import { ConfirmationWindow } from "./features/confirmation";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,9 +35,13 @@ function Root() {
     return null;
   }
 
-  // Route to popup or main app based on window label
+  // Route to popup, confirmation, or main app based on window label
   if (windowLabel === "popup") {
     return <PopupWindow />;
+  }
+
+  if (windowLabel === "confirmation") {
+    return <ConfirmationWindow />;
   }
 
   return <App />;

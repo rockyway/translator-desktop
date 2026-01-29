@@ -1,6 +1,6 @@
 //! Named Pipe client for receiving text selection events from .NET TextMonitor.
 
-use crate::commands::PopupTextState;
+use crate::commands::{get_char_limit_setting, show_translation_confirmation, DbState, PopupTextState};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
@@ -256,6 +256,20 @@ fn show_popup_with_text(app_handle: &AppHandle, text: String, cursor_x: i32, cur
     let state: PopupTextState = (*app_handle.state::<PopupTextState>()).clone();
 
     tauri::async_runtime::spawn(async move {
+        // Character limit confirmation check
+        if let Some(db_state) = app_handle_clone.try_state::<DbState>() {
+            let char_limit = get_char_limit_setting(&db_state).await;
+            if char_limit > 0 && text.len() > char_limit {
+                log::info!("IPC: Text exceeds {} chars, showing confirmation", char_limit);
+                let confirmed = show_translation_confirmation(&app_handle_clone, text.len(), cursor_x, cursor_y).await;
+                if !confirmed {
+                    log::info!("IPC: User declined translation");
+                    return; // Exit without showing popup
+                }
+                log::info!("IPC: User confirmed translation");
+            }
+        }
+
         // Set the popup text
         {
             let mut stored_text = state.0.lock().await;

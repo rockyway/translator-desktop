@@ -40,6 +40,20 @@
         "minHeight": 200,
         "center": false,
         "focus": true
+      },
+      {
+        "label": "confirmation",
+        "title": "Confirm Translation",
+        "width": 400,
+        "height": 280,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false,
+        "center": false,
+        "focus": true
       }
     ],
     "security": {

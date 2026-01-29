@@ -129,6 +129,9 @@ export function TranslationPanel({
 
   const inputText = watch('inputText');
 
+  // Extract ref from register to merge with custom ref
+  const { ref: registerRef, ...registerRest } = register('inputText');
+
   // Translation hook
   const {
     translate,
@@ -155,6 +158,32 @@ export function TranslationPanel({
 
   // Ref for aria-live region
   const translationResultRef = useRef<HTMLDivElement>(null);
+
+  // Refs for height syncing
+  const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const outputContentRef = useRef<HTMLDivElement>(null);
+
+  // Sync textarea height to match output content
+  useEffect(() => {
+    const textarea = inputTextareaRef.current;
+    const outputContent = outputContentRef.current;
+
+    if (!textarea || !outputContent) return;
+
+    const syncHeight = () => {
+      const contentHeight = outputContent.scrollHeight;
+      const minHeight = 120;
+      const maxHeight = 500;
+      const desiredHeight = Math.min(Math.max(contentHeight, minHeight), maxHeight);
+
+      textarea.style.height = `${desiredHeight}px`;
+    };
+
+    syncHeight();
+    const timer = setTimeout(syncHeight, 150);
+
+    return () => clearTimeout(timer);
+  }, [translatedText, inputText]);
 
   // Manual translation handler
   const handleTranslate = useCallback(() => {
@@ -303,7 +332,7 @@ export function TranslationPanel({
   return (
     <div className={`w-full ${className}`}>
       {/* Main Layout: Left Panel | Swap | Right Panel */}
-      <div className="flex flex-col md:flex-row gap-4">
+      <div className="flex flex-col md:flex-row gap-4 md:items-stretch">
         {/* LEFT PANEL: Source Language + Input */}
         <div className="flex-1 min-w-0">
           {/* Source Language Selector */}
@@ -333,14 +362,19 @@ export function TranslationPanel({
               </label>
               <textarea
                 id="input-text"
-                {...register('inputText')}
+                {...registerRest}
+                ref={(e) => {
+                  registerRef(e); // React Hook Form ref
+                  inputTextareaRef.current = e; // Custom ref for height sync
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder="Enter text for translation… (Ctrl+Enter to proceed)"
                 aria-label="Text to translate"
                 aria-describedby="char-count"
-                className="w-full min-h-[100px] resize-none bg-transparent
+                className="w-full resize-none bg-transparent overflow-y-auto
                   text-gray-900 dark:text-gray-100 placeholder:text-sm placeholder:text-amber-400 dark:placeholder:text-amber-500
                   focus:outline-none text-lg leading-relaxed"
+                style={{ whiteSpace: 'pre-wrap', height: '120px' }}
                 maxLength={maxChars}
               />
 
@@ -460,11 +494,12 @@ export function TranslationPanel({
             <div className="p-4 flex flex-col">
               {/* Translation Result */}
               <div
-                ref={translationResultRef}
                 aria-live="polite"
                 aria-atomic="true"
-                className="flex-1 min-h-[100px]"
+                className="overflow-y-auto"
+                style={{ minHeight: '120px', maxHeight: '500px' }}
               >
+                <div ref={outputContentRef}>
                 {/* Loading State */}
                 {isLoading && (
                   <div className="flex items-center gap-3 text-blue-600 dark:text-blue-400">
@@ -519,16 +554,26 @@ export function TranslationPanel({
 
                 {/* Translated Text */}
                 {!isLoading && !error && (
-                  <p
+                  <div
                     className={`text-lg leading-relaxed ${
                       translatedText
                         ? 'text-gray-900 dark:text-gray-100'
                         : 'text-blue-400 dark:text-blue-500 italic'
                     }`}
                   >
-                    {translatedText || 'Translation will appear here...'}
-                  </p>
+                    {translatedText ? (
+                      translatedText.split(/\r\n|\r|\n/).map((line, i, arr) => (
+                        <span key={i}>
+                          {line}
+                          {i < arr.length - 1 && <br />}
+                        </span>
+                      ))
+                    ) : (
+                      'Translation will appear here...'
+                    )}
+                  </div>
                 )}
+                </div>
               </div>
 
               {/* Output Footer */}

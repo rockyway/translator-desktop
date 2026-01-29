@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { FiCheck, FiMoon, FiSun, FiMonitor, FiType } from 'react-icons/fi';
+import { FiCheck, FiMoon, FiSun, FiMonitor, FiType, FiAlertCircle } from 'react-icons/fi';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettings } from '../../hooks/useSettings';
 import type { Theme, SelectionModifier, HotkeyModifier, DensityPreset } from '../../contexts/SettingsContext';
@@ -500,7 +500,7 @@ interface SettingsPanelProps {
  * All settings auto-save with a subtle "Saved" indicator.
  */
 export function SettingsPanel({ className = '' }: SettingsPanelProps) {
-  const { settings, updateSetting, isLoading } = useSettings();
+  const { settings, updateSetting, isLoading, hotkeyError } = useSettings();
   const [showSaved, setShowSaved] = useState(false);
   const [autoStartEnabled, setAutoStartEnabled] = useState(false);
   const [autoStartLoading, setAutoStartLoading] = useState(true);
@@ -570,6 +570,28 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
       flashSavedIndicator();
     },
     [updateSetting, flashSavedIndicator]
+  );
+
+  const handleHotkeyLetterChange = useCallback(
+    (letter: string) => {
+      updateSetting('hotkeyLetter', letter);
+      flashSavedIndicator();
+    },
+    [updateSetting, flashSavedIndicator]
+  );
+
+  /**
+   * Format hotkey label for display (e.g., "Ctrl+Shift+Q")
+   */
+  const formatHotkeyLabel = useCallback(
+    (modifier: HotkeyModifier, letter: string): string => {
+      const modParts = modifier
+        .split('+')
+        .map((m) => m.charAt(0).toUpperCase() + m.slice(1))
+        .join('+');
+      return `${modParts}+${letter.toUpperCase()}`;
+    },
+    []
   );
 
   const handleDensityChange = useCallback(
@@ -724,12 +746,73 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
           />
         </SettingRow>
         <SettingRow
-          label="Global hotkey modifier"
-          description={`Press ${settings.hotkeyModifier === 'ctrl+shift' ? 'Ctrl+Shift' : settings.hotkeyModifier === 'ctrl+alt' ? 'Ctrl+Alt' : 'Alt+Shift'}+Q to translate selected text`}
+          label="Global hotkey"
+          description={`Press ${formatHotkeyLabel(settings.hotkeyModifier, settings.hotkeyLetter)} to translate selected text`}
         >
-          <HotkeyModifierSelector
-            value={settings.hotkeyModifier}
-            onChange={handleHotkeyModifierChange}
+          <div className="flex items-center gap-2">
+            <HotkeyModifierSelector
+              value={settings.hotkeyModifier}
+              onChange={handleHotkeyModifierChange}
+            />
+
+            <span className="text-gray-400 dark:text-gray-500 font-medium">+</span>
+
+            <input
+              type="text"
+              maxLength={1}
+              value={settings.hotkeyLetter.toUpperCase()}
+              onChange={(e) => {
+                const letter = e.target.value.toLowerCase();
+                if (/^[a-z]$/.test(letter) || letter === '') {
+                  handleHotkeyLetterChange(letter || 'q');
+                }
+              }}
+              placeholder="Q"
+              className="w-12 h-10 text-center text-lg font-bold uppercase
+                bg-gray-100 dark:bg-gray-700
+                border-2 border-gray-300 dark:border-gray-600
+                rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none
+                text-gray-900 dark:text-gray-100"
+              aria-label="Hotkey letter"
+            />
+          </div>
+        </SettingRow>
+        {hotkeyError && (
+          <div className="flex items-start gap-2 p-3 rounded-lg
+            bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+            <FiAlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-red-700 dark:text-red-300 font-medium">
+                Hotkey registration failed
+              </p>
+              <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                {hotkeyError}
+              </p>
+              <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                Try a different key combination. Your previous hotkey is still active.
+              </p>
+            </div>
+          </div>
+        )}
+        <SettingRow
+          label="Character limit confirmation"
+          description="Ask before translating text longer than this (0 to disable)"
+        >
+          <input
+            type="number"
+            min="0"
+            max="1000"
+            step="10"
+            value={settings.confirmationCharLimit}
+            onChange={(e) => {
+              const value = Math.max(0, Math.min(1000, Number(e.target.value)));
+              updateSetting('confirmationCharLimit', value);
+              flashSavedIndicator();
+            }}
+            className="w-24 px-3 py-2 text-sm rounded-lg
+              bg-gray-100 dark:bg-gray-700
+              border border-gray-200 dark:border-gray-600
+              focus:ring-2 focus:ring-amber-500 focus:outline-none"
           />
         </SettingRow>
       </SettingSection>

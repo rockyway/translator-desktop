@@ -375,13 +375,18 @@ export function PopupOverlay({
                 <FiVolume2 className={`w-4 h-4 ${isPlayingSource ? 'animate-pulse' : ''}`} aria-hidden="true" />
               </button>
             </div>
-            <div className="max-h-24 overflow-y-auto mt-0.5 custom-scrollbar">
-              <p
+            <div className="max-h-24 overflow-y-auto mt-0.5 custom-scrollbar min-w-0">
+              <div
                 ref={sourceTextRef}
-                className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap"
+                className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed"
               >
-                {text}
-              </p>
+                {text.split(/\r\n|\r|\n/).map((line, i, arr) => (
+                  <span key={i}>
+                    {line}
+                    {i < arr.length - 1 && <br />}
+                  </span>
+                ))}
+              </div>
               {/* Pronunciation/Transliteration for source text */}
               {metadata?.transliteration && (
                 <p className="mt-0.5 text-xs text-amber-500 dark:text-amber-400 font-mono italic">
@@ -418,7 +423,7 @@ export function PopupOverlay({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto mt-0.5 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto mt-0.5 custom-scrollbar min-w-0">
               {/* Loading State */}
               {isLoading && (
                 <div className="flex items-center gap-2 text-blue-500 dark:text-blue-400">
@@ -457,12 +462,21 @@ export function PopupOverlay({
               {/* Translated Text */}
               {!isLoading && !error && (
                 <>
-                  <p
+                  <div
                     ref={targetTextRef}
-                    className="text-sm text-gray-900 dark:text-gray-100 leading-relaxed font-medium whitespace-pre-wrap"
+                    className="text-sm text-gray-900 dark:text-gray-100 leading-relaxed font-medium"
                   >
-                    {translatedText || 'Waiting for text...'}
-                  </p>
+                    {translatedText ? (
+                      translatedText.split(/\r\n|\r|\n/).map((line, i, arr) => (
+                        <span key={i}>
+                          {line}
+                          {i < arr.length - 1 && <br />}
+                        </span>
+                      ))
+                    ) : (
+                      'Waiting for text...'
+                    )}
+                  </div>
 
                   {/* Compact Definitions - inline after translation */}
                   {metadata?.definitions && metadata.definitions.length > 0 && (
