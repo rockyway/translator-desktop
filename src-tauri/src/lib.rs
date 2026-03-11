@@ -559,6 +559,12 @@ pub fn run() {
                             if let Err(e) = macos_monitor::start_monitor(app.clone()) {
                                 log::error!("macOS: Failed to start monitor on focus: {}", e);
                             }
+                            // Clear the permission banner and update connection status
+                            let _ = app.emit("accessibility-permission-granted", ());
+                            let _ = app.emit("ipc-connected", serde_json::json!({
+                                "connected": true,
+                                "timestamp": chrono::Utc::now().to_rfc3339()
+                            }));
                         });
                     }
                 }

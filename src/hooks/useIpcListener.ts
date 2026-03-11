@@ -53,6 +53,7 @@ export function useIpcListener(): UseIpcListenerResult {
     let unlistenDisconnected: (() => void) | undefined;
     let unlistenVersion: (() => void) | undefined;
     let unlistenAccessibility: (() => void) | undefined;
+    let unlistenAccessibilityGranted: (() => void) | undefined;
 
     const setupListeners = async () => {
       try {
@@ -111,6 +112,15 @@ export function useIpcListener(): UseIpcListenerResult {
           }
         );
 
+        // Listen for macOS accessibility permission granted (after user enables it)
+        unlistenAccessibilityGranted = await listen(
+          "accessibility-permission-granted",
+          () => {
+            console.log("Accessibility permission granted");
+            setNeedsAccessibilityPermission(false);
+          }
+        );
+
         console.log("IPC listeners registered");
       } catch (error) {
         console.error("Failed to setup IPC listeners:", error);
@@ -134,6 +144,9 @@ export function useIpcListener(): UseIpcListenerResult {
       }
       if (unlistenAccessibility) {
         unlistenAccessibility();
+      }
+      if (unlistenAccessibilityGranted) {
+        unlistenAccessibilityGranted();
       }
       console.log("IPC listeners unregistered");
     };
