@@ -4,12 +4,13 @@
 //! including simulating Ctrl+C to copy selected text and triggering
 //! the translation popup.
 
-use crate::commands::{get_char_limit_setting, show_translation_confirmation, DbState, PopupTextState};
+use crate::commands::{get_char_limit_setting, show_translation_confirmation, DbState};
+use crate::popup_handler::show_popup_with_text;
 #[cfg(not(target_os = "macos"))]
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[cfg(target_os = "windows")]
@@ -196,27 +197,26 @@ async fn simulate_copy_with_retry(
     }
 }
 
-/// Non-Windows: uses enigo to simulate copy with retry.
+/// Non-Windows: simulate Cmd+C and read clipboard.
+/// Strategy: simulate copy, wait briefly for clipboard update, then return
+/// whatever is in the clipboard. If content changed, great. If not, the
+/// existing clipboard text is likely what the user wants to translate.
 #[cfg(not(target_os = "windows"))]
 async fn simulate_copy_with_retry(
     app: &AppHandle,
     old_clipboard: Option<String>,
 ) -> Result<String, String> {
-    let max_duration = Duration::from_secs(3);
-    let poll_interval = Duration::from_millis(100);
-    let start = std::time::Instant::now();
-
-    // Delay to let hotkey modifier keys (Ctrl+Shift) release before simulating Cmd+C
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Brief delay to let hotkey modifier keys release before simulating Cmd+C
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Simulate copy (Cmd+C on macOS, Ctrl+C on Linux)
     if let Err(e) = simulate_copy() {
         log::warn!("simulate_copy failed: {}", e);
     }
 
-    // Poll clipboard for changes
-    while start.elapsed() < max_duration {
-        tokio::time::sleep(poll_interval).await;
+    // Wait for clipboard to update, checking a few times
+    for i in 0..5 {
+        tokio::time::sleep(Duration::from_millis(80)).await;
 
         if let Ok(text) = app.clipboard().read_text() {
             if !text.trim().is_empty() {
@@ -225,16 +225,24 @@ async fn simulate_copy_with_retry(
                     None => true,
                 };
                 if is_new {
+                    log::info!("Hotkey: Clipboard changed after {}ms", (i + 1) * 80);
                     return Ok(text);
                 }
             }
         }
     }
 
-    // Fallback
-    app.clipboard()
+    // Clipboard didn't change — return existing content (user likely re-selected same text)
+    let text = app.clipboard()
         .read_text()
-        .map_err(|e| format!("Clipboard read failed: {}", e))
+        .map_err(|e| format!("Clipboard read failed: {}", e))?;
+
+    if text.trim().is_empty() {
+        Err("No text selected or clipboard is empty".to_string())
+    } else {
+        log::info!("Hotkey: Using existing clipboard content ({} chars)", text.len());
+        Ok(text)
+    }
 }
 
 /// Gets the current cursor position using Windows API.
@@ -400,70 +408,11 @@ pub async fn trigger_hotkey_translate(app: AppHandle) -> Result<String, String> 
         }
     }
 
-    // Step 4: Set popup text state
-    let state = app.state::<PopupTextState>();
-    {
-        let mut stored_text = state.0.lock().await;
-        *stored_text = text.clone();
-    }
-
-    // Step 5: Show popup at screen center
-    show_popup_centered(&app, text.clone())?;
+    // Step 4: Show popup at cursor position on the active monitor
+    let (cursor_x, cursor_y) = get_cursor_position();
+    show_popup_with_text(&app, text.clone(), cursor_x, cursor_y);
 
     Ok(text)
-}
-
-/// Shows the popup window at the center of the primary monitor.
-fn show_popup_centered(app_handle: &AppHandle, text: String) -> Result<(), String> {
-    let window = app_handle
-        .get_webview_window("popup")
-        .ok_or_else(|| "Popup window not found".to_string())?;
-
-    // Get popup window size
-    let popup_size = window
-        .outer_size()
-        .map_err(|e| format!("Failed to get popup size: {}", e))?;
-
-    // Try to get the primary monitor for centering
-    let position = if let Ok(Some(monitor)) = window.primary_monitor() {
-        let monitor_size = monitor.size();
-        let monitor_pos = monitor.position();
-
-        // Calculate center position
-        let x = monitor_pos.x + (monitor_size.width as i32 - popup_size.width as i32) / 2;
-        let y = monitor_pos.y + (monitor_size.height as i32 - popup_size.height as i32) / 2;
-
-        PhysicalPosition::new(x, y)
-    } else {
-        // Fallback to fixed position if monitor info unavailable
-        PhysicalPosition::new(400, 300)
-    };
-
-    // Position and show the window
-    window
-        .set_position(position)
-        .map_err(|e| format!("Failed to set popup position: {}", e))?;
-
-    window
-        .show()
-        .map_err(|e| format!("Failed to show popup: {}", e))?;
-
-    window
-        .set_focus()
-        .map_err(|e| format!("Failed to focus popup: {}", e))?;
-
-    // Emit event to popup window to refresh text
-    if let Err(e) = app_handle.emit("popup-text-updated", text.clone()) {
-        log::error!("Hotkey: Failed to emit popup-text-updated event: {}", e);
-    }
-
-    log::info!(
-        "Hotkey: Popup shown at ({}, {})",
-        position.x,
-        position.y
-    );
-
-    Ok(())
 }
 
 /// Handles the global hotkey event.
@@ -528,15 +477,9 @@ async fn trigger_hotkey_translate_internal(app: &AppHandle) -> Result<String, St
         log::warn!("Hotkey internal: DbState not available, skipping char limit check");
     }
 
-    // Step 4: Set popup text state
-    let state = app.state::<PopupTextState>();
-    {
-        let mut stored_text = state.0.lock().await;
-        *stored_text = text.clone();
-    }
-
-    // Step 5: Show popup at screen center
-    show_popup_centered(app, text.clone())?;
+    // Step 4: Show popup at cursor position on the active monitor
+    let (cursor_x, cursor_y) = get_cursor_position();
+    show_popup_with_text(app, text.clone(), cursor_x, cursor_y);
 
     Ok(text)
 }

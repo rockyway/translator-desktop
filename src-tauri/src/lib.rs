@@ -28,7 +28,7 @@ use std::fs;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 // Unused imports removed - Code, Modifiers, Shortcut are imported via commands module
 use tokio::sync::Mutex;
@@ -222,10 +222,12 @@ pub fn run() {
                 tauri::image::Image::new_owned(vec![0; 32 * 32 * 4], 32, 32)
             };
 
-            // Create tray menu
+            // Create tray menu with app name header
+            let app_name_item = MenuItem::with_id(app, "app_name", "Translator Desktop", false, None::<&str>)?;
+            let separator = PredefinedMenuItem::separator(app)?;
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let exit_item = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &exit_item])?;
+            let tray_menu = Menu::with_items(app, &[&app_name_item, &separator, &show_item, &exit_item])?;
 
             // Build the tray icon
             let _tray = TrayIconBuilder::new()
@@ -235,6 +237,8 @@ pub fn run() {
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {
                         "show" => {
+                            #[cfg(target_os = "macos")]
+                            let _ = app.set_dock_visibility(true);
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
@@ -260,6 +264,8 @@ pub fn run() {
                     } = event
                     {
                         let app = tray.app_handle();
+                        #[cfg(target_os = "macos")]
+                        let _ = app.set_dock_visibility(true);
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
@@ -580,6 +586,8 @@ pub fn run() {
                         if minimize_to_tray {
                             // Hide window to tray instead of closing
                             let _ = window_clone.hide();
+                            #[cfg(target_os = "macos")]
+                            let _ = app_handle.set_dock_visibility(false);
                         } else {
                             // Actually close the app
                             FORCE_EXIT.store(true, Ordering::SeqCst);
