@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FiCopy, FiVolume2, FiExternalLink, FiX, FiChevronDown } from 'react-icons/fi';
+import { MdStop } from 'react-icons/md';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -126,6 +127,10 @@ export function PopupOverlay({
   const sourceTextRef = useRef<HTMLParagraphElement>(null);
   const targetTextRef = useRef<HTMLParagraphElement>(null);
 
+  // Refs for audio elements
+  const sourceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const targetAudioRef = useRef<HTMLAudioElement | null>(null);
+
   // Target language - load from Tauri settings (set by Main UI)
   const [targetLanguage, setTargetLanguage] = useState(
     defaultTargetLanguage || DEFAULT_TARGET_LANGUAGE
@@ -180,6 +185,28 @@ export function PopupOverlay({
       translate(text);
     }
   }, [text, translate]);
+
+  // Stop all audio playback
+  const stopAllAudio = useCallback(() => {
+    if (sourceAudioRef.current) {
+      sourceAudioRef.current.pause();
+      sourceAudioRef.current.currentTime = 0;
+      sourceAudioRef.current = null;
+      setIsPlayingSource(false);
+    }
+    if (targetAudioRef.current) {
+      targetAudioRef.current.pause();
+      targetAudioRef.current.currentTime = 0;
+      targetAudioRef.current = null;
+      setIsPlayingTarget(false);
+    }
+  }, []);
+
+  // Handle close with audio cleanup
+  const handleClose = useCallback(() => {
+    stopAllAudio();
+    onClose();
+  }, [stopAllAudio, onClose]);
 
   // Dynamically resize popup based on content
   useEffect(() => {
@@ -237,13 +264,20 @@ export function PopupOverlay({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        handleClose();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [handleClose]);
+
+  // Cleanup: Stop any playing audio when popup closes (fallback)
+  useEffect(() => {
+    return () => {
+      stopAllAudio();
+    };
+  }, [stopAllAudio]);
 
   // Handle window dragging - using mousedown event
   const handleStartDrag = useCallback(async (e: React.MouseEvent) => {
@@ -268,49 +302,87 @@ export function PopupOverlay({
     }
   }, [translatedText]);
 
-  // Handle listen source (text-to-speech)
+  // Handle listen source (text-to-speech) - toggle play/stop
   const handleListenSource = useCallback(async () => {
-    if (!text || isPlayingSource) return;
+    if (!text) return;
+
+    // If already playing, stop it
+    if (isPlayingSource && sourceAudioRef.current) {
+      sourceAudioRef.current.pause();
+      sourceAudioRef.current.currentTime = 0;
+      sourceAudioRef.current = null;
+      setIsPlayingSource(false);
+      return;
+    }
 
     const langCode = detectedLanguage || 'en';
-    // Truncate to 200 chars for Google TTS API limit
-    const textToSpeak = text.length > 200 ? text.slice(0, 200) : text;
 
     try {
       setIsPlayingSource(true);
-      await playTextToSpeech(textToSpeak, langCode);
+      const audio = await playTextToSpeech(text, langCode);
+      sourceAudioRef.current = audio;
+
+      // Listen for when audio ends naturally
+      audio.addEventListener('ended', () => {
+        setIsPlayingSource(false);
+        sourceAudioRef.current = null;
+      });
+
+      // Listen for errors
+      audio.addEventListener('error', () => {
+        setIsPlayingSource(false);
+        sourceAudioRef.current = null;
+      });
     } catch (error) {
       console.error('Text-to-speech failed:', error);
-    } finally {
       setIsPlayingSource(false);
+      sourceAudioRef.current = null;
     }
   }, [text, detectedLanguage, isPlayingSource]);
 
-  // Handle listen target (text-to-speech)
+  // Handle listen target (text-to-speech) - toggle play/stop
   const handleListenTarget = useCallback(async () => {
-    if (!translatedText || isPlayingTarget) return;
+    if (!translatedText) return;
 
-    // Truncate to 200 chars for Google TTS API limit
-    const textToSpeak = translatedText.length > 200
-      ? translatedText.slice(0, 200)
-      : translatedText;
+    // If already playing, stop it
+    if (isPlayingTarget && targetAudioRef.current) {
+      targetAudioRef.current.pause();
+      targetAudioRef.current.currentTime = 0;
+      targetAudioRef.current = null;
+      setIsPlayingTarget(false);
+      return;
+    }
 
     try {
       setIsPlayingTarget(true);
-      await playTextToSpeech(textToSpeak, targetLanguage);
+      const audio = await playTextToSpeech(translatedText, targetLanguage);
+      targetAudioRef.current = audio;
+
+      // Listen for when audio ends naturally
+      audio.addEventListener('ended', () => {
+        setIsPlayingTarget(false);
+        targetAudioRef.current = null;
+      });
+
+      // Listen for errors
+      audio.addEventListener('error', () => {
+        setIsPlayingTarget(false);
+        targetAudioRef.current = null;
+      });
     } catch (error) {
       console.error('Text-to-speech failed:', error);
-    } finally {
       setIsPlayingTarget(false);
+      targetAudioRef.current = null;
     }
   }, [translatedText, targetLanguage, isPlayingTarget]);
 
   // Handle open in main window with content transfer
   const handleOpenMain = useCallback(() => {
     const sourceLang = detectedLanguage || 'auto';
+    stopAllAudio();
     onOpenMain(text, translatedText, sourceLang, targetLanguage, metadata);
     onClose();
-  }, [onOpenMain, onClose, text, translatedText, detectedLanguage, targetLanguage, metadata]);
+  }, [stopAllAudio, onOpenMain, onClose, text, translatedText, detectedLanguage, targetLanguage, metadata]);
 
   // Handle language change
   const handleTargetLanguageChange = useCallback((code: string) => {
@@ -343,7 +415,7 @@ export function PopupOverlay({
           </span>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="Close popup"
             className="w-8 h-8 flex items-center justify-center hover:bg-red-500 dark:hover:bg-red-600 transition-colors group"
             onMouseDown={(e) => e.stopPropagation()}
@@ -363,16 +435,20 @@ export function PopupOverlay({
               <button
                 type="button"
                 onClick={handleListenSource}
-                disabled={!text || isPlayingSource}
-                aria-label="Listen to source text"
-                title="Listen"
-                className={`p-1 rounded transition-colors focus:outline-none
-                  ${text && !isPlayingSource
+                disabled={!text}
+                aria-label={isPlayingSource ? "Stop audio" : "Listen to source text"}
+                title={isPlayingSource ? "Stop" : "Listen"}
+                className={`p-1 rounded transition-colors outline-none
+                  ${text
                     ? 'text-amber-500 hover:bg-amber-100 dark:hover:bg-amber-900/30'
                     : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
                   }`}
               >
-                <FiVolume2 className={`w-4 h-4 ${isPlayingSource ? 'animate-pulse' : ''}`} aria-hidden="true" />
+                {isPlayingSource ? (
+                  <MdStop className="w-4 h-4" aria-hidden="true" />
+                ) : (
+                  <FiVolume2 className="w-4 h-4" aria-hidden="true" />
+                )}
               </button>
             </div>
             <div className="max-h-24 overflow-y-auto mt-0.5 custom-scrollbar min-w-0">
@@ -410,16 +486,20 @@ export function PopupOverlay({
               <button
                 type="button"
                 onClick={handleListenTarget}
-                disabled={!translatedText || isPlayingTarget}
-                aria-label="Listen to translated text"
-                title="Listen"
-                className={`p-1 rounded transition-colors focus:outline-none
-                  ${translatedText && !isPlayingTarget
+                disabled={!translatedText}
+                aria-label={isPlayingTarget ? "Stop audio" : "Listen to translated text"}
+                title={isPlayingTarget ? "Stop" : "Listen"}
+                className={`p-1 rounded transition-colors outline-none
+                  ${translatedText
                     ? 'text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-900/30'
                     : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
                   }`}
               >
-                <FiVolume2 className={`w-4 h-4 ${isPlayingTarget ? 'animate-pulse' : ''}`} aria-hidden="true" />
+                {isPlayingTarget ? (
+                  <MdStop className="w-4 h-4" aria-hidden="true" />
+                ) : (
+                  <FiVolume2 className="w-4 h-4" aria-hidden="true" />
+                )}
               </button>
             </div>
 

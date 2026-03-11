@@ -191,33 +191,27 @@ export async function translateText(
 /**
  * Plays text using Tauri backend (Google Text-to-Speech API)
  *
- * @param text - The text to convert to speech (max 200 characters)
+ * @param text - The text to convert to speech (truncated to 200 characters if longer)
  * @param languageCode - The language code for the voice (e.g., 'en', 'es', 'ja')
- * @returns Promise that resolves when audio starts playing
- * @throws TTSError if TTS fails or text exceeds 200 characters
+ * @returns Promise that resolves to the Audio element when audio starts playing
+ * @throws TTSError if TTS fails
  *
  * @example
  * ```ts
- * await playTextToSpeech('Hello world', 'en');
+ * const audio = await playTextToSpeech('Hello world', 'en');
+ * // Later you can stop it: audio.pause(); audio.currentTime = 0;
  * ```
  */
 export async function playTextToSpeech(
   text: string,
   languageCode: string
-): Promise<void> {
-  // Handle empty text
-  if (!text || text.trim() === '') {
-    return;
-  }
-
-  // Validate text length (Google TTS API limit)
-  if (text.length > 200) {
-    throw new TTSError('Text exceeds 200 character limit for text-to-speech');
-  }
+): Promise<HTMLAudioElement> {
+  // Truncate to 200 chars for Google TTS API limit (handle internally)
+  const textToSpeak = text.length > 200 ? text.slice(0, 200) : text;
 
   try {
     const base64MP3 = await invoke<string>('speak', {
-      text,
+      text: textToSpeak,
       languageCode,
     });
 
@@ -244,6 +238,7 @@ export async function playTextToSpeech(
     });
 
     await audio.play();
+    return audio;
   } catch (error) {
     // Re-throw TTSError as-is
     if (error instanceof TTSError) {

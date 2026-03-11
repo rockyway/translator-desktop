@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { FiVolume2, FiCopy, FiRepeat, FiAlertCircle, FiRefreshCw, FiArrowRight, FiRotateCcw } from 'react-icons/fi';
+import { MdStop } from 'react-icons/md';
 import { LanguageSelector } from './LanguageSelector';
 import { MetadataSection } from './MetadataSection';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -109,6 +110,14 @@ export function TranslationPanel({
 
   // Copy success feedback
   const [copySuccess, setCopySuccess] = useState(false);
+
+  // Audio playback state
+  const [isPlayingInput, setIsPlayingInput] = useState(false);
+  const [isPlayingOutput, setIsPlayingOutput] = useState(false);
+
+  // Refs for audio elements
+  const inputAudioRef = useRef<HTMLAudioElement | null>(null);
+  const outputAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Pre-translated text from popup (to avoid re-translating)
   const [preTranslatedText, setPreTranslatedText] = useState<string | undefined>(
@@ -259,9 +268,18 @@ export function TranslationPanel({
     setDisplayedMetadata(undefined);
   }, [setValue]);
 
-  // Handle listen (text-to-speech) for input
+  // Handle listen (text-to-speech) for input - toggle play/stop
   const handleListenInput = useCallback(async () => {
     if (!inputText.trim()) return;
+
+    // If already playing, stop it
+    if (isPlayingInput && inputAudioRef.current) {
+      inputAudioRef.current.pause();
+      inputAudioRef.current.currentTime = 0;
+      inputAudioRef.current = null;
+      setIsPlayingInput(false);
+      return;
+    }
 
     const langCode = sourceLanguage === 'auto' && detectedLanguage
       ? detectedLanguage
@@ -269,33 +287,64 @@ export function TranslationPanel({
         ? 'en'
         : sourceLanguage;
 
-    // Truncate to 200 chars for Google TTS API limit
-    const textToSpeak = inputText.length > 200
-      ? inputText.slice(0, 200)
-      : inputText;
-
     try {
-      await playTextToSpeech(textToSpeak, langCode);
+      setIsPlayingInput(true);
+      const audio = await playTextToSpeech(inputText.trim(), langCode);
+      inputAudioRef.current = audio;
+
+      // Listen for when audio ends naturally
+      audio.addEventListener('ended', () => {
+        setIsPlayingInput(false);
+        inputAudioRef.current = null;
+      });
+
+      // Listen for errors
+      audio.addEventListener('error', () => {
+        setIsPlayingInput(false);
+        inputAudioRef.current = null;
+      });
     } catch (error) {
       console.error('Text-to-speech failed:', error);
+      setIsPlayingInput(false);
+      inputAudioRef.current = null;
     }
-  }, [inputText, sourceLanguage, detectedLanguage]);
+  }, [inputText, sourceLanguage, detectedLanguage, isPlayingInput]);
 
-  // Handle listen (text-to-speech) for output
+  // Handle listen (text-to-speech) for output - toggle play/stop
   const handleListenOutput = useCallback(async () => {
     if (!translatedText.trim()) return;
 
-    // Truncate to 200 chars for Google TTS API limit
-    const textToSpeak = translatedText.length > 200
-      ? translatedText.slice(0, 200)
-      : translatedText;
+    // If already playing, stop it
+    if (isPlayingOutput && outputAudioRef.current) {
+      outputAudioRef.current.pause();
+      outputAudioRef.current.currentTime = 0;
+      outputAudioRef.current = null;
+      setIsPlayingOutput(false);
+      return;
+    }
 
     try {
-      await playTextToSpeech(textToSpeak, targetLanguage);
+      setIsPlayingOutput(true);
+      const audio = await playTextToSpeech(translatedText.trim(), targetLanguage);
+      outputAudioRef.current = audio;
+
+      // Listen for when audio ends naturally
+      audio.addEventListener('ended', () => {
+        setIsPlayingOutput(false);
+        outputAudioRef.current = null;
+      });
+
+      // Listen for errors
+      audio.addEventListener('error', () => {
+        setIsPlayingOutput(false);
+        outputAudioRef.current = null;
+      });
     } catch (error) {
       console.error('Text-to-speech failed:', error);
+      setIsPlayingOutput(false);
+      outputAudioRef.current = null;
     }
-  }, [translatedText, targetLanguage]);
+  }, [translatedText, targetLanguage, isPlayingOutput]);
 
   // Handle copy to clipboard
   const handleCopy = useCallback(async () => {
@@ -395,8 +444,7 @@ export function TranslationPanel({
                     disabled={!inputText.trim()}
                     aria-label="Translate text"
                     title="Translate"
-                    className={`p-1.5 rounded-md transition-all
-                      focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
+                    className={`p-1.5 rounded-md transition-all outline-none
                       ${inputText.trim()
                         ? 'text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30'
                         : 'text-amber-300 dark:text-amber-700 cursor-not-allowed'
@@ -409,16 +457,19 @@ export function TranslationPanel({
                     type="button"
                     onClick={handleListenInput}
                     disabled={!inputText.trim()}
-                    aria-label="Listen to input text"
-                    title="Listen"
-                    className={`p-1.5 rounded-md transition-all
-                      focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
+                    aria-label={isPlayingInput ? "Stop audio" : "Listen to input text"}
+                    title={isPlayingInput ? "Stop" : "Listen"}
+                    className={`p-1.5 rounded-md transition-all outline-none
                       ${inputText.trim()
                         ? 'text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30'
                         : 'text-amber-300 dark:text-amber-700 cursor-not-allowed'
                       }`}
                   >
-                    <FiVolume2 className="w-4 h-4" aria-hidden="true" />
+                    {isPlayingInput ? (
+                      <MdStop className="w-4 h-4" aria-hidden="true" />
+                    ) : (
+                      <FiVolume2 className="w-4 h-4" aria-hidden="true" />
+                    )}
                   </button>
                 </div>
 
@@ -429,8 +480,7 @@ export function TranslationPanel({
                   disabled={!inputText.trim()}
                   aria-label="Clear input text"
                   title="Clear"
-                  className={`p-1.5 rounded-md transition-all
-                    focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
+                  className={`p-1.5 rounded-md transition-all outline-none
                     ${inputText.trim()
                       ? 'text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30'
                       : 'text-amber-300 dark:text-amber-700 cursor-not-allowed'
@@ -462,8 +512,7 @@ export function TranslationPanel({
             onClick={handleSwap}
             disabled={!canSwap}
             aria-label="Swap source and target languages"
-            className={`p-4 rounded-full transition-all shadow-lg
-              focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800
+            className={`p-4 rounded-full transition-all shadow-lg outline-none
               ${canSwap
                 ? 'bg-gradient-to-r from-amber-600 to-blue-600 text-white hover:from-amber-700 hover:to-blue-700 hover:shadow-xl cursor-pointer'
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
@@ -582,16 +631,19 @@ export function TranslationPanel({
                   type="button"
                   onClick={handleListenOutput}
                   disabled={!translatedText}
-                  aria-label="Listen to translated text"
-                  title="Listen"
-                  className={`p-1.5 rounded-md transition-all
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
+                  aria-label={isPlayingOutput ? "Stop audio" : "Listen to translated text"}
+                  title={isPlayingOutput ? "Stop" : "Listen"}
+                  className={`p-1.5 rounded-md transition-all outline-none
                     ${translatedText
                       ? 'text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30'
                       : 'text-blue-300 dark:text-blue-700 cursor-not-allowed'
                     }`}
                 >
-                  <FiVolume2 className="w-4 h-4" aria-hidden="true" />
+                  {isPlayingOutput ? (
+                    <MdStop className="w-4 h-4" aria-hidden="true" />
+                  ) : (
+                    <FiVolume2 className="w-4 h-4" aria-hidden="true" />
+                  )}
                 </button>
 
                 <button
@@ -600,8 +652,7 @@ export function TranslationPanel({
                   disabled={!translatedText}
                   aria-label={copySuccess ? 'Copied!' : 'Copy translated text'}
                   title={copySuccess ? 'Copied!' : 'Copy'}
-                  className={`p-1.5 rounded-md transition-all
-                    focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 dark:focus:ring-offset-gray-800
+                  className={`p-1.5 rounded-md transition-all outline-none
                     ${translatedText
                       ? copySuccess
                         ? 'bg-green-500 text-white'
