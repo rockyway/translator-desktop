@@ -56,7 +56,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name || format('v{0}', inputs.version) }}
-          releaseName: 'Translator Desktop ${{ github.ref_name || format('v{0}', inputs.version) }}'
+          releaseName: "Translator Desktop ${{ github.ref_name || format('v{0}', inputs.version) }}"
           releaseBody: |
             ## What's New
 
