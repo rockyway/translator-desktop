@@ -22,8 +22,9 @@
         "resizable": true,
         "fullscreen": false,
         "center": true,
-        "decorations": false,
-        "transparent": true
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       },
       {
         "label": "popup",
@@ -32,7 +33,6 @@
         "height": 320,
         "alwaysOnTop": true,
         "decorations": false,
-        "transparent": true,
         "skipTaskbar": true,
         "visible": false,
         "resizable": true,
@@ -48,7 +48,6 @@
         "height": 280,
         "alwaysOnTop": true,
         "decorations": false,
-        "transparent": true,
         "skipTaskbar": true,
         "visible": false,
         "resizable": false,
@@ -62,21 +61,24 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.ico"
-    ],
-    "externalBin": [
-      "text-monitor"
+      "icons/icon.ico",
+      "icons/icon.icns"
     ],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
+      "timestampUrl": "",
+      "nsis": {}
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": "Entitlements.plist"
     }
   },
   "plugins": {

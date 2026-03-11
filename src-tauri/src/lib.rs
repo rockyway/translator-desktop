@@ -2,7 +2,10 @@
 
 mod commands;
 mod ipc;
+mod popup_handler;
 mod sidecar;
+#[cfg(target_os = "macos")]
+mod macos_monitor;
 
 use commands::{
     add_history, apply_acrylic_effect, apply_mica_effect, clear_history, close_window,
@@ -15,14 +18,16 @@ use commands::{
     ConfirmationDataState, ConfirmationState, DbState, HotkeyState, HttpClientState,
     PopupTextState,
 };
-use ipc::{is_ipc_connected, start_ipc_listener};
+use ipc::is_ipc_connected;
+#[cfg(target_os = "windows")]
+use ipc::start_ipc_listener;
 use sidecar::{init_job_object, is_text_monitor_running, start_text_monitor, stop_text_monitor, SidecarState};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
 use std::fs;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 // Unused imports removed - Code, Modifiers, Shortcut are imported via commands module
@@ -41,6 +46,27 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 fn get_ipc_status() -> bool {
     is_ipc_connected()
+}
+
+/// Check if macOS Accessibility permission is granted.
+/// Returns true on non-macOS platforms.
+#[tauri::command]
+fn check_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    { macos_monitor::check_accessibility_permission() }
+    #[cfg(not(target_os = "macos"))]
+    { true }
+}
+
+/// Request macOS Accessibility permission and open System Settings.
+/// No-op on non-macOS platforms.
+#[tauri::command]
+fn request_accessibility_permission() {
+    #[cfg(target_os = "macos")]
+    {
+        macos_monitor::request_accessibility_permission();
+        macos_monitor::open_accessibility_settings();
+    }
 }
 
 /// Exit the application completely (bypasses minimize to tray)
@@ -162,7 +188,7 @@ pub fn run() {
             // Creating once avoids TLS/connection pool setup on first request
             app.manage(HttpClientState::default());
 
-            // Apply Mica effect and set window icon (Windows 11)
+            // Apply window effects per platform
             #[cfg(target_os = "windows")]
             {
                 if let Some(window) = app.get_webview_window("main") {
@@ -182,6 +208,8 @@ pub fn run() {
                     }
                 }
             }
+
+            // macOS: Skip vibrancy — transparent windows cause click-through issues
 
             // Create system tray icon with context menu
             let icon_bytes = include_bytes!("../icons/32x32.png");
@@ -256,6 +284,7 @@ pub fn run() {
             }).expect("Error setting Ctrl+C handler");
 
             let app_handle = app.handle().clone();
+            #[allow(unused_variables)]
             let sidecar_app_handle = app.handle().clone();
 
             // Initialize SQLite database for history
@@ -347,7 +376,8 @@ pub fn run() {
                 }
             });
 
-            // Start IPC listener to receive text selection events from .NET TextMonitor
+            // Start IPC listener (Windows: Named Pipe to .NET sidecar)
+            #[cfg(target_os = "windows")]
             start_ipc_listener(app.handle().clone());
 
             // Register global hotkey based on saved setting (or default to Ctrl+Shift+Q)
@@ -370,7 +400,9 @@ pub fn run() {
                         .ok()
                         .flatten()
                         .and_then(|v| serde_json::from_str::<String>(&v).ok())
-                        .unwrap_or_else(|| "ctrl+shift".to_string());
+                        .unwrap_or_else(|| {
+                            "ctrl+shift".to_string()
+                        });
 
                         let letter = sqlx::query_scalar::<_, String>(
                             "SELECT value FROM config_store WHERE key = 'hotkey_letter'",
@@ -380,13 +412,33 @@ pub fn run() {
                         .ok()
                         .flatten()
                         .and_then(|v| serde_json::from_str::<String>(&v).ok())
-                        .unwrap_or_else(|| "q".to_string());
+                        .unwrap_or_else(|| {
+                            #[cfg(target_os = "macos")]
+                            { "r".to_string() }
+                            #[cfg(not(target_os = "macos"))]
+                            { "q".to_string() }
+                        });
 
                         drop(pool);
                         (modifier, letter)
                     } else {
-                        ("ctrl+shift".to_string(), "q".to_string())
+                        let default_mod = "ctrl+shift".to_string();
+                        #[cfg(target_os = "macos")]
+                        let default_letter = "r".to_string();
+                        #[cfg(not(target_os = "macos"))]
+                        let default_letter = "q".to_string();
+                        (default_mod, default_letter)
                     }
+                };
+
+                // macOS: Cmd+Shift+Q is reserved by macOS for "Log Out"
+                // Auto-fix stale config from Windows or previous macOS defaults
+                #[cfg(target_os = "macos")]
+                let (modifier, letter) = if modifier.contains("cmd") && letter == "q" {
+                    log::warn!("macOS: Cmd+Shift+Q is reserved. Changing to Ctrl+Shift+R.");
+                    ("ctrl+shift".to_string(), "r".to_string())
+                } else {
+                    (modifier, letter)
                 };
 
                 // Register initial hotkey using the update_global_hotkey function
@@ -408,73 +460,104 @@ pub fn run() {
                 }
             });
 
-            // Start the text monitor sidecar after a brief delay to ensure app is ready
-            let config_app_handle = sidecar_app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                // Small delay to ensure all services are initialized
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            // Windows: Start the .NET text monitor sidecar and send initial config
+            #[cfg(target_os = "windows")]
+            {
+                let config_app_handle = sidecar_app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-                log::info!("Attempting to start text monitor sidecar...");
-                let sidecar_state = sidecar_app_handle.state::<SidecarState>();
-                match sidecar_state.start(&sidecar_app_handle).await {
-                    Ok(()) => {
-                        log::info!("Sidecar started successfully");
-                        println!("[App] Text monitor sidecar started");
+                    log::info!("Attempting to start text monitor sidecar...");
+                    let sidecar_state = sidecar_app_handle.state::<SidecarState>();
+                    match sidecar_state.start(&sidecar_app_handle).await {
+                        Ok(()) => {
+                            log::info!("Sidecar started successfully");
+                        }
+                        Err(e) => {
+                            log::error!("Failed to start text monitor sidecar: {}", e);
+                            // Don't crash - app can work without sidecar (hotkey-only mode)
+                        }
                     }
-                    Err(e) => {
-                        log::error!("Failed to start text monitor sidecar: {}", e);
-                        eprintln!("[App Error] Failed to start text monitor sidecar: {}", e);
-                        // Don't crash - app can work without sidecar (hotkey-only mode)
+                });
+
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+
+                    let modifier = {
+                        let db_state = config_app_handle.try_state::<DbState>();
+                        if let Some(db) = db_state {
+                            let pool = db.0.lock().await;
+                            sqlx::query_scalar::<_, String>(
+                                "SELECT value FROM config_store WHERE key = 'selection_modifier'",
+                            )
+                            .fetch_optional(&*pool)
+                            .await
+                            .ok()
+                            .flatten()
+                            .and_then(|v| serde_json::from_str::<String>(&v).ok())
+                            .unwrap_or_else(|| "alt".to_string())
+                        } else {
+                            "alt".to_string()
+                        }
+                    };
+
+                    use crate::ipc::{send_config, ConfigMessage};
+                    log::info!("Sending initial selection modifier to .NET: {}", modifier);
+                    let message = ConfigMessage::update_selection_modifier(&modifier);
+                    match send_config(message).await {
+                        Ok(()) => {
+                            log::info!("Initial selection modifier '{}' sent to .NET", modifier);
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to send initial config to .NET (may not be ready yet): {}",
+                                e
+                            );
+                        }
                     }
-                }
-            });
+                });
+            }
 
-            // Send initial configuration to .NET after sidecar starts
-            tauri::async_runtime::spawn(async move {
-                // Wait for .NET config receiver to be ready
-                tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
+            // macOS: Start native text selection monitor
+            #[cfg(target_os = "macos")]
+            {
+                let macos_app_handle = sidecar_app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-                // Get saved selection_modifier from database
-                let modifier = {
-                    let db_state = config_app_handle.try_state::<DbState>();
-                    if let Some(db) = db_state {
-                        let pool = db.0.lock().await;
-                        sqlx::query_scalar::<_, String>(
-                            "SELECT value FROM config_store WHERE key = 'selection_modifier'",
-                        )
-                        .fetch_optional(&*pool)
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|v| serde_json::from_str::<String>(&v).ok())
-                        .unwrap_or_else(|| "alt".to_string()) // Default to alt
+                    if macos_monitor::check_accessibility_permission() {
+                        log::info!("macOS: Accessibility permission granted, starting native monitor");
+                        if let Err(e) = macos_monitor::start_monitor(macos_app_handle.clone()) {
+                            log::error!("macOS: Failed to start native monitor: {}", e);
+                        }
                     } else {
-                        "alt".to_string()
+                        log::warn!("macOS: Accessibility permission not granted, running in hotkey-only mode");
+                        macos_monitor::request_accessibility_permission();
+                        let _ = macos_app_handle.emit("accessibility-permission-needed", ());
                     }
-                };
-
-                // Send to .NET
-                use crate::ipc::{send_config, ConfigMessage};
-                log::info!("Sending initial selection modifier to .NET: {}", modifier);
-                let message = ConfigMessage::update_selection_modifier(&modifier);
-                match send_config(message).await {
-                    Ok(()) => {
-                        log::info!("Initial selection modifier '{}' sent to .NET", modifier);
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to send initial config to .NET (may not be ready yet): {}",
-                            e
-                        );
-                    }
-                }
-            });
+                });
+            }
 
             log::info!("=== Initialization Complete ===");
 
             Ok(())
         })
         .on_window_event(|window, event| {
+            // macOS: Re-check accessibility permission when window regains focus
+            #[cfg(target_os = "macos")]
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Focused(true) = event {
+                    if macos_monitor::check_accessibility_permission() {
+                        let app = window.app_handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = macos_monitor::start_monitor(app.clone()) {
+                                log::error!("macOS: Failed to start monitor on focus: {}", e);
+                            }
+                        });
+                    }
+                }
+            }
+
             // Handle close request for main window
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -545,7 +628,9 @@ pub fn run() {
             is_autostart_enabled,
             set_autostart_enabled,
             respond_to_confirmation,
-            get_confirmation_data
+            get_confirmation_data,
+            check_accessibility_permission,
+            request_accessibility_permission
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

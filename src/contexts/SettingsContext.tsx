@@ -17,7 +17,7 @@ export type ResolvedTheme = 'light' | 'dark';
 /** Modifier key for text selection trigger (Ctrl+select, Shift+select, etc.) */
 export type SelectionModifier = 'ctrl' | 'shift' | 'alt';
 /** Modifier key combination for global hotkey (Ctrl+Shift+Q, etc.) */
-export type HotkeyModifier = 'ctrl+shift' | 'ctrl+alt' | 'alt+shift';
+export type HotkeyModifier = 'ctrl+shift' | 'ctrl+alt' | 'alt+shift' | 'cmd+shift' | 'cmd+alt';
 /** UI density preset affecting font size */
 export type DensityPreset = 'default' | 'large' | 'xlarge' | 'custom';
 
@@ -52,6 +52,9 @@ export interface SettingsContextValue {
 // Constants
 // ============================================================================
 
+const IS_MACOS = typeof navigator !== 'undefined' &&
+  (navigator.platform.toUpperCase().includes("MAC") || navigator.userAgent.toUpperCase().includes("MAC"));
+
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
   sourceLanguage: 'auto',
@@ -59,7 +62,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   sidebarCollapsed: false,
   selectionModifier: 'alt',
   hotkeyModifier: 'ctrl+shift',
-  hotkeyLetter: 'q',
+  hotkeyLetter: IS_MACOS ? 'r' : 'q',
   minimizeToTray: true, // Default to minimize to tray on close
   density: 'default',
   customDensity: 100, // 100% by default
@@ -368,6 +371,10 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
   /**
    * Update a single setting
    */
+  // Use a ref to access latest settings without causing callback recreation
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
   const updateSetting = useCallback(
     async <K extends keyof AppSettings>(
       key: K,
@@ -385,8 +392,8 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
 
       // Handle density changes immediately
       if (key === 'density' || key === 'customDensity') {
-        // For density changes, we need to get the new settings object to calculate
-        const newSettings = { ...settings, [key]: value };
+        const currentSettings = settingsRef.current;
+        const newSettings = { ...currentSettings, [key]: value };
         const newDensity = getDensityPercentage(newSettings as AppSettings);
         applyDensityToDocument(newDensity);
       }
@@ -403,10 +410,11 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         }
       } else if (key === 'hotkeyModifier' || key === 'hotkeyLetter') {
         try {
+          const currentSettings = settingsRef.current;
           const modifier =
-            key === 'hotkeyModifier' ? (value as string) : settings.hotkeyModifier;
+            key === 'hotkeyModifier' ? (value as string) : currentSettings.hotkeyModifier;
           const letter =
-            key === 'hotkeyLetter' ? (value as string) : settings.hotkeyLetter;
+            key === 'hotkeyLetter' ? (value as string) : currentSettings.hotkeyLetter;
           await invoke('update_global_hotkey', { modifier, letter });
           setHotkeyError(null); // Clear error on success
         } catch (error) {
@@ -419,7 +427,7 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         }
       }
     },
-    [saveSettingToBackend, settings]
+    [saveSettingToBackend]
   );
 
   /**
@@ -439,7 +447,8 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
 
       // Handle density changes immediately
       if (updates.density !== undefined || updates.customDensity !== undefined) {
-        const newSettings = { ...settings, ...updates };
+        const currentSettings = settingsRef.current;
+        const newSettings = { ...currentSettings, ...updates };
         const newDensity = getDensityPercentage(newSettings as AppSettings);
         applyDensityToDocument(newDensity);
       }
@@ -454,7 +463,7 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         }
       }
     },
-    [saveSettingToBackend, settings]
+    [saveSettingToBackend]
   );
 
   const contextValue: SettingsContextValue = {

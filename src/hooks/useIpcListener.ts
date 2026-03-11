@@ -29,6 +29,7 @@ export interface UseIpcListenerResult {
   selectedText: string | null;
   isConnected: boolean;
   textMonitorVersion: string | null;
+  needsAccessibilityPermission: boolean;
   clearSelectedText: () => void;
 }
 
@@ -40,6 +41,7 @@ export function useIpcListener(): UseIpcListenerResult {
   const [selectedText, setSelectedText] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [textMonitorVersion, setTextMonitorVersion] = useState<string | null>(null);
+  const [needsAccessibilityPermission, setNeedsAccessibilityPermission] = useState(false);
 
   const clearSelectedText = useCallback(() => {
     setSelectedText(null);
@@ -50,6 +52,7 @@ export function useIpcListener(): UseIpcListenerResult {
     let unlistenConnected: (() => void) | undefined;
     let unlistenDisconnected: (() => void) | undefined;
     let unlistenVersion: (() => void) | undefined;
+    let unlistenAccessibility: (() => void) | undefined;
 
     const setupListeners = async () => {
       try {
@@ -99,6 +102,15 @@ export function useIpcListener(): UseIpcListenerResult {
           }
         );
 
+        // Listen for macOS accessibility permission needed event
+        unlistenAccessibility = await listen(
+          "accessibility-permission-needed",
+          () => {
+            console.log("Accessibility permission needed");
+            setNeedsAccessibilityPermission(true);
+          }
+        );
+
         console.log("IPC listeners registered");
       } catch (error) {
         console.error("Failed to setup IPC listeners:", error);
@@ -120,6 +132,9 @@ export function useIpcListener(): UseIpcListenerResult {
       if (unlistenVersion) {
         unlistenVersion();
       }
+      if (unlistenAccessibility) {
+        unlistenAccessibility();
+      }
       console.log("IPC listeners unregistered");
     };
   }, []);
@@ -128,6 +143,7 @@ export function useIpcListener(): UseIpcListenerResult {
     selectedText,
     isConnected,
     textMonitorVersion,
+    needsAccessibilityPermission,
     clearSelectedText,
   };
 }

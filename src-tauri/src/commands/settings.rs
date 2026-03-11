@@ -14,6 +14,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
 use tokio::sync::Mutex;
 
 use super::DbState;
+#[cfg(target_os = "windows")]
 use crate::ipc::{send_config, ConfigMessage};
 
 /// State for tracking the current global hotkey shortcut.
@@ -21,11 +22,12 @@ pub struct HotkeyState(pub Arc<Mutex<Shortcut>>);
 
 impl Default for HotkeyState {
     fn default() -> Self {
-        // Default: Ctrl+Shift+Q
-        Self(Arc::new(Mutex::new(Shortcut::new(
-            Some(Modifiers::CONTROL | Modifiers::SHIFT),
-            Code::KeyQ,
-        ))))
+        // macOS: Ctrl+Shift+R, Windows: Ctrl+Shift+Q
+        #[cfg(target_os = "macos")]
+        let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR);
+        #[cfg(not(target_os = "macos"))]
+        let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyQ);
+        Self(Arc::new(Mutex::new(shortcut)))
     }
 }
 
@@ -35,8 +37,10 @@ fn parse_modifiers(modifier: &str) -> Result<Modifiers, String> {
         "ctrl+shift" => Ok(Modifiers::CONTROL | Modifiers::SHIFT),
         "ctrl+alt" => Ok(Modifiers::CONTROL | Modifiers::ALT),
         "alt+shift" => Ok(Modifiers::ALT | Modifiers::SHIFT),
+        "cmd+shift" => Ok(Modifiers::META | Modifiers::SHIFT),
+        "cmd+alt" => Ok(Modifiers::META | Modifiers::ALT),
         _ => Err(format!(
-            "Invalid modifier: {}. Valid: ctrl+shift, ctrl+alt, alt+shift",
+            "Invalid modifier: {}. Valid: ctrl+shift, ctrl+alt, alt+shift, cmd+shift, cmd+alt",
             modifier
         )),
     }
@@ -120,14 +124,21 @@ pub async fn update_global_hotkey(
     }
 }
 
-/// Updates the selection modifier in the .NET Text Monitor.
-/// Called when user changes the setting in the UI.
+/// Updates the selection modifier in the text monitor.
+/// On Windows: sends to .NET Text Monitor via Named Pipe.
+/// On macOS: updates the in-process native monitor.
 #[tauri::command]
 pub async fn update_selection_modifier(modifier: String) -> Result<(), String> {
-    let message = ConfigMessage::update_selection_modifier(&modifier);
-    send_config(message)
-        .await
-        .map_err(|e| format!("Failed to update selection modifier: {}", e))?;
+    #[cfg(target_os = "windows")]
+    {
+        let message = ConfigMessage::update_selection_modifier(&modifier);
+        send_config(message)
+            .await
+            .map_err(|e| format!("Failed to update selection modifier: {}", e))?;
+    }
+
+    // On macOS, the modifier is read from the database by the in-process monitor
+    // No IPC needed since it runs in the same process
 
     log::info!("Selection modifier updated to: {}", modifier);
     Ok(())

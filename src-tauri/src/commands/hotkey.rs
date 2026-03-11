@@ -5,6 +5,7 @@
 //! the translation popup.
 
 use crate::commands::{get_char_limit_setting, show_translation_confirmation, DbState, PopupTextState};
+#[cfg(not(target_os = "macos"))]
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::thread;
 use std::time::Duration;
@@ -19,6 +20,7 @@ use windows::Win32::{
 };
 
 /// Small delay between key presses for stability (milliseconds).
+#[cfg(not(target_os = "macos"))]
 const KEY_PRESS_DELAY_MS: u64 = 10;
 
 /// Virtual key codes for Windows API
@@ -194,7 +196,7 @@ async fn simulate_copy_with_retry(
     }
 }
 
-/// Non-Windows fallback: uses enigo to simulate Ctrl+C with retry.
+/// Non-Windows: uses enigo to simulate copy with retry.
 #[cfg(not(target_os = "windows"))]
 async fn simulate_copy_with_retry(
     app: &AppHandle,
@@ -204,7 +206,10 @@ async fn simulate_copy_with_retry(
     let poll_interval = Duration::from_millis(100);
     let start = std::time::Instant::now();
 
-    // Simulate Ctrl+C once using enigo
+    // Delay to let hotkey modifier keys (Ctrl+Shift) release before simulating Cmd+C
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Simulate copy (Cmd+C on macOS, Ctrl+C on Linux)
     if let Err(e) = simulate_copy() {
         log::warn!("simulate_copy failed: {}", e);
     }
@@ -249,28 +254,87 @@ fn get_cursor_position() -> (i32, i32) {
     }
 }
 
-/// Fallback for non-Windows platforms - returns center of primary monitor.
-#[cfg(not(target_os = "windows"))]
+/// Gets the current cursor position on macOS using Core Graphics.
+#[cfg(target_os = "macos")]
 fn get_cursor_position() -> (i32, i32) {
-    (500, 300) // Default center-ish position
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    if let Ok(source) = CGEventSource::new(CGEventSourceStateID::CombinedSessionState) {
+        if let Ok(event) = CGEvent::new(source) {
+            let point = event.location();
+            return (point.x as i32, point.y as i32);
+        }
+    }
+    log::warn!("macOS: Failed to get cursor position, defaulting to (500, 300)");
+    (500, 300)
 }
 
-/// Simulate Ctrl+C to copy selected text to clipboard
-/// Releases Alt and Shift keys first to avoid interference
+/// Fallback for other non-Windows platforms.
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn get_cursor_position() -> (i32, i32) {
+    (500, 300)
+}
+
+/// Simulate copy (Ctrl+C on Windows/Linux, Cmd+C on macOS)
 #[tauri::command]
 pub fn simulate_copy() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        simulate_copy_macos()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        simulate_copy_enigo()
+    }
+}
+
+/// macOS: Use CGEvent directly to simulate Cmd+C.
+/// This avoids enigo crashes from conflicting modifier key state.
+#[cfg(target_os = "macos")]
+fn simulate_copy_macos() -> Result<(), String> {
+    use core_graphics::event::{CGEvent, CGEventFlags, CGKeyCode};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    // Virtual keycode for 'C' on macOS
+    const KC_C: CGKeyCode = 8;
+
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Failed to create CGEventSource".to_string())?;
+
+    // Create key-down and key-up events for 'C'
+    let key_down = CGEvent::new_keyboard_event(source.clone(), KC_C, true)
+        .map_err(|_| "Failed to create key-down event".to_string())?;
+    let key_up = CGEvent::new_keyboard_event(source, KC_C, false)
+        .map_err(|_| "Failed to create key-up event".to_string())?;
+
+    // Set Cmd flag (⌘) on both events
+    key_down.set_flags(CGEventFlags::CGEventFlagCommand);
+    key_up.set_flags(CGEventFlags::CGEventFlagCommand);
+
+    // Post events to the HID event system
+    key_down.post(core_graphics::event::CGEventTapLocation::HID);
+    thread::sleep(Duration::from_millis(50));
+    key_up.post(core_graphics::event::CGEventTapLocation::HID);
+
+    log::info!("Hotkey: Simulated Cmd+C via CGEvent");
+    Ok(())
+}
+
+/// Non-macOS: Use enigo to simulate copy.
+#[cfg(not(target_os = "macos"))]
+fn simulate_copy_enigo() -> Result<(), String> {
     let settings = Settings::default();
     let mut enigo = Enigo::new(&settings).map_err(|e| format!("Failed to create Enigo: {}", e))?;
 
-    // Small delay to ensure target app has focus
+    let copy_modifier = Key::Control;
+
     thread::sleep(Duration::from_millis(KEY_PRESS_DELAY_MS));
 
-    // Press Ctrl
-    enigo.key(Key::Control, Direction::Press)
-        .map_err(|e| format!("Failed to press Control: {}", e))?;
+    enigo.key(copy_modifier, Direction::Press)
+        .map_err(|e| format!("Failed to press copy modifier: {}", e))?;
     thread::sleep(Duration::from_millis(KEY_PRESS_DELAY_MS));
 
-    // Press and release 'C' key
     enigo.key(Key::Unicode('c'), Direction::Press)
         .map_err(|e| format!("Failed to press C: {}", e))?;
     thread::sleep(Duration::from_millis(KEY_PRESS_DELAY_MS));
@@ -278,11 +342,10 @@ pub fn simulate_copy() -> Result<(), String> {
         .map_err(|e| format!("Failed to release C: {}", e))?;
     thread::sleep(Duration::from_millis(KEY_PRESS_DELAY_MS));
 
-    // Release Ctrl
-    enigo.key(Key::Control, Direction::Release)
-        .map_err(|e| format!("Failed to release Control: {}", e))?;
+    enigo.key(copy_modifier, Direction::Release)
+        .map_err(|e| format!("Failed to release copy modifier: {}", e))?;
 
-    log::info!("Hotkey: Simulated Ctrl+C");
+    log::info!("Hotkey: Simulated copy command");
     Ok(())
 }
 

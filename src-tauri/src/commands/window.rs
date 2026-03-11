@@ -1,8 +1,8 @@
 use tauri::Window;
-use window_vibrancy::{apply_mica, apply_acrylic};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     #[error("Failed to apply window effect: {0}")]
     EffectError(String),
     #[error("Tauri error: {0}")]
@@ -18,25 +18,27 @@ impl serde::Serialize for WindowError {
     }
 }
 
-/// Apply Mica effect to the main window (Windows 11)
+/// Apply Mica effect (Windows 11) or vibrancy (macOS)
 #[tauri::command]
-pub fn apply_mica_effect(window: Window) -> Result<(), WindowError> {
+pub fn apply_mica_effect(_window: Window) -> Result<(), WindowError> {
     #[cfg(target_os = "windows")]
     {
-        apply_mica(&window, Some(true))
+        window_vibrancy::apply_mica(&_window, Some(true))
             .map_err(|e| WindowError::EffectError(e.to_string()))?;
     }
+
     Ok(())
 }
 
-/// Apply Acrylic effect to the main window (Windows 10/11 fallback)
+/// Apply Acrylic effect (Windows 10/11 fallback)
 #[tauri::command]
-pub fn apply_acrylic_effect(window: Window) -> Result<(), WindowError> {
+pub fn apply_acrylic_effect(_window: Window) -> Result<(), WindowError> {
     #[cfg(target_os = "windows")]
     {
-        apply_acrylic(&window, Some((18, 18, 18, 125)))
+        window_vibrancy::apply_acrylic(&_window, Some((18, 18, 18, 125)))
             .map_err(|e| WindowError::EffectError(e.to_string()))?;
     }
+
     Ok(())
 }
 

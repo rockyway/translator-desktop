@@ -7,6 +7,7 @@ import { memo } from 'react';
 export interface StatusBarProps {
   isConnected: boolean;
   textMonitorVersion: string | null;
+  needsAccessibilityPermission?: boolean;
 }
 
 // ============================================================================
@@ -16,13 +17,28 @@ export interface StatusBarProps {
 /**
  * Minimal status bar at the bottom of the app window.
  *
- * Displays connection status to the text monitor service with a sleek,
- * unobtrusive design that complements the app's gold/amber theme.
+ * Displays text monitor status:
+ * - Windows: "Connected" (IPC to .NET sidecar) / "Disconnected"
+ * - macOS: "Text Monitor Active" / "Hotkey Only" (if accessibility not granted)
  */
 export const StatusBar = memo(function StatusBar({
   isConnected,
   textMonitorVersion,
+  needsAccessibilityPermission: _needsAccessibilityPermission = false,
 }: StatusBarProps) {
+  const IS_MACOS = navigator.platform.toUpperCase().includes("MAC") ||
+    navigator.userAgent.toUpperCase().includes("MAC");
+
+  // Determine display state
+  // On macOS: show "Text Monitor Active" when connected, "Hotkey Only" otherwise (no "Disconnected")
+  // On Windows: show "Connected" / "Disconnected" based on IPC to .NET sidecar
+  const isActive = isConnected;
+  const statusText = isActive
+    ? 'Ready'
+    : IS_MACOS
+      ? 'Hotkey Only'
+      : 'Disconnected';
+
   return (
     <footer
       className="
@@ -43,14 +59,14 @@ export const StatusBar = memo(function StatusBar({
           <span
             className={`
               absolute inline-flex h-full w-full rounded-full opacity-60
-              ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}
+              ${isActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}
             `}
-            style={{ animationDuration: isConnected ? '2.5s' : undefined }}
+            style={{ animationDuration: isActive ? '2.5s' : undefined }}
           />
           <span
             className={`
               relative inline-flex rounded-full h-2 w-2
-              ${isConnected ? 'bg-emerald-500' : 'bg-amber-500'}
+              ${isActive ? 'bg-emerald-500' : 'bg-amber-500'}
             `}
           />
         </span>
@@ -59,16 +75,16 @@ export const StatusBar = memo(function StatusBar({
         <span
           className={`
             text-xs font-medium tracking-wide
-            ${isConnected ? 'text-emerald-400/90' : 'text-amber-400/90'}
+            ${isActive ? 'text-emerald-400/90' : 'text-amber-400/90'}
           `}
         >
-          {isConnected ? 'Connected' : 'Disconnected'}
+          {statusText}
         </span>
 
         {/* Separator and version when connected */}
-        {isConnected && textMonitorVersion && (
+        {isActive && textMonitorVersion && (
           <>
-            <span className="text-gray-600 text-xs">•</span>
+            <span className="text-gray-600 text-xs">&bull;</span>
             <span className="text-xs text-gray-500 font-mono">
               v{textMonitorVersion}
             </span>

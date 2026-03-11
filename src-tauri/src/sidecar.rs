@@ -1,12 +1,15 @@
-//! Sidecar management for the .NET Text Monitor service.
+//! Sidecar management for the text monitor service.
 //!
-//! This module handles starting and stopping the text-monitor sidecar
-//! that provides global text selection detection via Windows hooks.
+//! On Windows: manages the .NET Text Monitor sidecar process.
+//! On macOS: delegates to the native in-process monitor (macos_monitor module).
 
 use std::sync::Arc;
 use tauri::async_runtime::Mutex;
 use tauri::AppHandle;
+
+#[cfg(target_os = "windows")]
 use tauri_plugin_shell::process::CommandChild;
+#[cfg(target_os = "windows")]
 use tauri_plugin_shell::ShellExt;
 
 #[cfg(target_os = "windows")]
@@ -105,19 +108,16 @@ pub fn init_job_object() {
 }
 
 /// Kill any existing text-monitor processes to ensure only one instance runs.
-/// This is called before starting a new sidecar instance.
 #[cfg(target_os = "windows")]
 fn kill_existing_text_monitor() {
     use std::process::Command;
     use std::os::windows::process::CommandExt;
 
-    // Kill both possible naming conventions
     let names = [
         "text-monitor-x86_64-pc-windows-msvc.exe",
         "text-monitor.exe",
     ];
 
-    // CREATE_NO_WINDOW flag to prevent console window from appearing
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
     for name in names {
@@ -134,60 +134,45 @@ fn kill_existing_text_monitor() {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-fn kill_existing_text_monitor() {
-    // On non-Windows, use pkill
-    use std::process::Command;
-    let _ = Command::new("pkill")
-        .args(["-f", "text-monitor"])
-        .output();
-}
-
-/// State for managing the sidecar process.
+/// State for managing the text monitor (sidecar on Windows, native on macOS).
 pub struct SidecarState {
-    /// The running sidecar child process, if any.
+    #[cfg(target_os = "windows")]
     child: Arc<Mutex<Option<CommandChild>>>,
+    #[cfg(not(target_os = "windows"))]
+    _running: Arc<Mutex<bool>>,
 }
 
 impl SidecarState {
-    /// Creates a new SidecarState.
     pub fn new() -> Self {
         Self {
+            #[cfg(target_os = "windows")]
             child: Arc::new(Mutex::new(None)),
+            #[cfg(not(target_os = "windows"))]
+            _running: Arc::new(Mutex::new(false)),
         }
     }
 
-    /// Starts the text-monitor sidecar if not already running.
-    ///
-    /// # Arguments
-    /// * `app` - The Tauri app handle
-    ///
-    /// # Returns
-    /// * `Ok(())` if the sidecar started successfully or was already running
-    /// * `Err(String)` if the sidecar failed to start
+    /// Starts the text monitor.
+    /// On Windows: spawns the .NET sidecar process.
+    /// On macOS: no-op (native monitor is started separately in lib.rs).
+    #[cfg(target_os = "windows")]
     pub async fn start(&self, app: &AppHandle) -> Result<(), String> {
         let mut guard = self.child.lock().await;
 
-        // Check if already running in our state
         if guard.is_some() {
             log::info!("Sidecar: Text monitor already running");
-            println!("[Sidecar] Text monitor already running");
             return Ok(());
         }
 
-        // Kill any existing text-monitor processes (from previous runs)
         kill_existing_text_monitor();
 
         log::info!("Sidecar: Starting text-monitor...");
-        println!("[Sidecar] Starting text-monitor...");
 
-        // Spawn the sidecar using shell plugin
         let sidecar_command = match app.shell().sidecar("text-monitor") {
             Ok(cmd) => cmd,
             Err(e) => {
                 let msg = format!("Failed to create sidecar command: {}", e);
                 log::error!("Sidecar: {}", msg);
-                println!("[Sidecar Error] {}", msg);
                 return Err(msg);
             }
         };
@@ -197,18 +182,13 @@ impl SidecarState {
             Err(e) => {
                 let msg = format!("Failed to spawn sidecar: {}", e);
                 log::error!("Sidecar: {}", msg);
-                println!("[Sidecar Error] {}", msg);
                 return Err(msg);
             }
         };
 
-        // Store the child process
         *guard = Some(child);
-
         log::info!("Sidecar: Text monitor started successfully");
-        println!("[Sidecar] Text monitor started successfully");
 
-        // Spawn a task to log sidecar output
         tauri::async_runtime::spawn(async move {
             use tauri_plugin_shell::process::CommandEvent;
 
@@ -219,7 +199,6 @@ impl SidecarState {
                             let trimmed = text.trim();
                             if !trimmed.is_empty() {
                                 log::debug!("Sidecar stdout: {}", trimmed);
-                                println!("[TextMonitor] {}", trimmed);
                             }
                         }
                     }
@@ -228,13 +207,11 @@ impl SidecarState {
                             let trimmed = text.trim();
                             if !trimmed.is_empty() {
                                 log::warn!("Sidecar stderr: {}", trimmed);
-                                eprintln!("[TextMonitor Error] {}", trimmed);
                             }
                         }
                     }
                     CommandEvent::Error(err) => {
                         log::error!("Sidecar error: {}", err);
-                        eprintln!("[TextMonitor Error] {}", err);
                     }
                     CommandEvent::Terminated(payload) => {
                         log::info!(
@@ -242,7 +219,6 @@ impl SidecarState {
                             payload.code,
                             payload.signal
                         );
-                        println!("[Sidecar] Terminated with code: {:?}", payload.code);
                         break;
                     }
                     _ => {}
@@ -253,28 +229,42 @@ impl SidecarState {
         Ok(())
     }
 
-    /// Stops the text-monitor sidecar if running.
+    #[cfg(not(target_os = "windows"))]
+    pub async fn start(&self, _app: &AppHandle) -> Result<(), String> {
+        log::info!("Sidecar: No sidecar needed on this platform");
+        Ok(())
+    }
+
+    /// Stops the text monitor.
+    #[cfg(target_os = "windows")]
     pub async fn stop(&self) -> Result<(), String> {
         let mut guard = self.child.lock().await;
 
         if let Some(child) = guard.take() {
             log::info!("Sidecar: Stopping text-monitor...");
-
             child
                 .kill()
                 .map_err(|e| format!("Failed to kill sidecar: {}", e))?;
-
             log::info!("Sidecar: Text monitor stopped");
-        } else {
-            log::debug!("Sidecar: Text monitor was not running");
         }
 
         Ok(())
     }
 
-    /// Checks if the sidecar is currently running.
+    #[cfg(not(target_os = "windows"))]
+    pub async fn stop(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Checks if the text monitor is currently running.
+    #[cfg(target_os = "windows")]
     pub async fn is_running(&self) -> bool {
         self.child.lock().await.is_some()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub async fn is_running(&self) -> bool {
+        false
     }
 }
 
@@ -284,7 +274,7 @@ impl Default for SidecarState {
     }
 }
 
-/// Tauri command to manually start the text monitor sidecar.
+/// Tauri command to manually start the text monitor.
 #[tauri::command]
 pub async fn start_text_monitor(
     app: AppHandle,
@@ -293,7 +283,7 @@ pub async fn start_text_monitor(
     state.start(&app).await
 }
 
-/// Tauri command to manually stop the text monitor sidecar.
+/// Tauri command to manually stop the text monitor.
 #[tauri::command]
 pub async fn stop_text_monitor(
     state: tauri::State<'_, SidecarState>,

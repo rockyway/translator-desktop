@@ -135,26 +135,32 @@ export function PopupOverlay({
   const [targetLanguage, setTargetLanguage] = useState(
     defaultTargetLanguage || DEFAULT_TARGET_LANGUAGE
   );
+  const [settingsLoaded, setSettingsLoaded] = useState(!!defaultTargetLanguage);
 
   // Load target language from Tauri settings when text changes (new popup shown)
   // This ensures we always use the latest language setting from Main UI
   useEffect(() => {
     if (defaultTargetLanguage) {
-      // If prop is provided, use it directly
+      setSettingsLoaded(true);
       return;
     }
 
     async function loadTargetLanguage() {
       try {
-        const savedLang = await invoke<string | null>('get_setting', {
+        const result = await invoke<{ key: string; value: string } | null>('get_setting', {
           key: 'target_language',
         });
-        if (savedLang) {
-          setTargetLanguage(savedLang);
+        // get_setting returns a JSON value — could be a string like "vi"
+        if (result !== null && result !== undefined) {
+          const lang = typeof result === 'string' ? result : String(result);
+          if (lang) {
+            setTargetLanguage(lang);
+          }
         }
       } catch (error) {
         console.error('Failed to load target language setting:', error);
-        // Keep default on error
+      } finally {
+        setSettingsLoaded(true);
       }
     }
 
@@ -179,12 +185,12 @@ export function PopupOverlay({
   // Main UI is the single source of truth for language preferences
   // Changes in popup are temporary for that session only
 
-  // Auto-translate when text changes
+  // Auto-translate when text changes — wait for settings to load first
   useEffect(() => {
-    if (text && text.trim()) {
+    if (text && text.trim() && settingsLoaded) {
       translate(text);
     }
-  }, [text, translate]);
+  }, [text, translate, settingsLoaded]);
 
   // Stop all audio playback
   const stopAllAudio = useCallback(() => {

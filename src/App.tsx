@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { SettingsProvider } from "./contexts/SettingsContext";
 import { useSettings } from "./hooks/useSettings";
@@ -41,7 +42,7 @@ interface InitialContent {
 
 function AppContent() {
   // Only use isConnected and textMonitorVersion from IPC - selectedText is handled by popup, not main app
-  const { isConnected, textMonitorVersion } = useIpcListener();
+  const { isConnected, textMonitorVersion, needsAccessibilityPermission } = useIpcListener();
   const { settings, updateSetting } = useSettings();
 
   const [activeTab, setActiveTab] = useState<SidebarTab>('translate');
@@ -93,8 +94,8 @@ function AppContent() {
       {/* Custom Title Bar - Fixed height, non-scrolling */}
       <TitleBar />
 
-      {/* Content wrapper below title bar */}
-      <div className="flex flex-1 min-h-0">
+      {/* Content wrapper below title bar - no-drag prevents macOS overlay from intercepting clicks */}
+      <div className="flex flex-1 min-h-0" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
         {/* Sidebar Navigation */}
         <Sidebar
           activeTab={activeTab}
@@ -167,10 +168,26 @@ function AppContent() {
         </main>
       </div>
 
+      {/* Accessibility Permission Banner (macOS) */}
+      {needsAccessibilityPermission && !isConnected && (
+        <div className="flex-shrink-0 bg-amber-900/80 border-t border-amber-700/50 px-4 py-2 flex items-center justify-between">
+          <span className="text-xs text-amber-200">
+            Text selection monitor requires Accessibility permission. Hotkey mode is still available.
+          </span>
+          <button
+            onClick={() => invoke('request_accessibility_permission')}
+            className="text-xs font-medium text-amber-100 bg-amber-700 hover:bg-amber-600 px-3 py-1 rounded transition-colors"
+          >
+            Open Settings
+          </button>
+        </div>
+      )}
+
       {/* Status Bar - Fixed at bottom */}
       <StatusBar
         isConnected={isConnected}
         textMonitorVersion={textMonitorVersion}
+        needsAccessibilityPermission={needsAccessibilityPermission}
       />
 
       {/* Update Notification - Fixed position overlay */}

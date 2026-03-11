@@ -37,6 +37,12 @@ interface DensityOption {
 }
 
 // ============================================================================
+// Platform detection
+// ============================================================================
+
+const IS_MACOS = navigator.platform.startsWith('Mac') || navigator.userAgent.includes('Mac');
+
+// ============================================================================
 // Constants
 // ============================================================================
 
@@ -64,8 +70,8 @@ const THEME_OPTIONS: ThemeOption[] = [
 const SELECTION_MODIFIER_OPTIONS: SelectionModifierOption[] = [
   {
     value: 'ctrl',
-    label: 'Ctrl',
-    description: 'Hold Ctrl while selecting text',
+    label: IS_MACOS ? 'Cmd' : 'Ctrl',
+    description: IS_MACOS ? 'Hold Cmd while selecting text' : 'Hold Ctrl while selecting text',
   },
   {
     value: 'shift',
@@ -74,29 +80,31 @@ const SELECTION_MODIFIER_OPTIONS: SelectionModifierOption[] = [
   },
   {
     value: 'alt',
-    label: 'Alt',
-    description: 'Hold Alt while selecting text',
+    label: IS_MACOS ? 'Option' : 'Alt',
+    description: IS_MACOS ? 'Hold Option while selecting text' : 'Hold Alt while selecting text',
   },
 ];
+
+const DEFAULT_LETTER = IS_MACOS ? 'R' : 'Q';
 
 const HOTKEY_MODIFIER_OPTIONS: HotkeyModifierOption[] = [
   {
     value: 'ctrl+shift',
     label: 'Ctrl+Shift',
-    shortcut: 'Ctrl+Shift+Q',
+    shortcut: `Ctrl+Shift+${DEFAULT_LETTER}`,
     description: 'Default modifier combination',
   },
   {
     value: 'ctrl+alt',
-    label: 'Ctrl+Alt',
-    shortcut: 'Ctrl+Alt+Q',
-    description: 'Alternative using Alt key',
+    label: IS_MACOS ? 'Ctrl+Option' : 'Ctrl+Alt',
+    shortcut: IS_MACOS ? `Ctrl+Option+${DEFAULT_LETTER}` : `Ctrl+Alt+${DEFAULT_LETTER}`,
+    description: IS_MACOS ? 'Alternative using Option key' : 'Alternative using Alt key',
   },
   {
     value: 'alt+shift',
-    label: 'Alt+Shift',
-    shortcut: 'Alt+Shift+Q',
-    description: 'Without Ctrl key',
+    label: IS_MACOS ? 'Option+Shift' : 'Alt+Shift',
+    shortcut: IS_MACOS ? `Option+Shift+${DEFAULT_LETTER}` : `Alt+Shift+${DEFAULT_LETTER}`,
+    description: IS_MACOS ? 'Without Ctrl key' : 'Without Ctrl key',
   },
 ];
 
@@ -581,13 +589,16 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
   );
 
   /**
-   * Format hotkey label for display (e.g., "Ctrl+Shift+Q")
+   * Format hotkey label for display (e.g., "Ctrl+Shift+Q" or "Cmd+Shift+Q" on macOS)
    */
   const formatHotkeyLabel = useCallback(
     (modifier: HotkeyModifier, letter: string): string => {
+      const keyMap: Record<string, string> = IS_MACOS
+        ? { ctrl: 'Cmd', alt: 'Option', shift: 'Shift' }
+        : { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' };
       const modParts = modifier
         .split('+')
-        .map((m) => m.charAt(0).toUpperCase() + m.slice(1))
+        .map((m) => keyMap[m.toLowerCase()] ?? (m.charAt(0).toUpperCase() + m.slice(1)))
         .join('+');
       return `${modParts}+${letter.toUpperCase()}`;
     },

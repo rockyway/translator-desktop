@@ -11,6 +11,7 @@
     "tauri": "tauri",
     "build:sidecar": "pwsh -File scripts/build-sidecar.ps1",
     "build:all": "npm run build:sidecar && npm run tauri build",
+    "build:macos": "npx tauri build --bundles app",
     "generate:icons": "node scripts/generate-icons.js"
   },
   "dependencies": {

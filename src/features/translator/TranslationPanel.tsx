@@ -165,9 +165,6 @@ export function TranslationPanel({
     }
   }, [metadata]);
 
-  // Ref for aria-live region
-  const translationResultRef = useRef<HTMLDivElement>(null);
-
   // Refs for height syncing
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null);
   const outputContentRef = useRef<HTMLDivElement>(null);
@@ -414,7 +411,7 @@ export function TranslationPanel({
                 {...registerRest}
                 ref={(e) => {
                   registerRef(e); // React Hook Form ref
-                  inputTextareaRef.current = e; // Custom ref for height sync
+                  (inputTextareaRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = e; // Custom ref for height sync
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder="Enter text for translation… (Ctrl+Enter to proceed)"
