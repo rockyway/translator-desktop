@@ -9,9 +9,11 @@ import {
   FiClock,
   FiArrowRight,
   FiRefreshCw,
+  FiVolume2,
 } from 'react-icons/fi';
+import { MdStop } from 'react-icons/md';
 import { useHistory, HistoryEntry } from '../../hooks/useHistory';
-import { getLanguageByCode, TranslationMetadata } from '../../services/translationService';
+import { getLanguageByCode, playTextToSpeech, TranslationMetadata } from '../../services/translationService';
 
 interface HistoryPanelProps {
   className?: string;
@@ -95,6 +97,87 @@ function HistoryCard({
     }
   })() : undefined;
 
+  // Audio playback state
+  const [isPlayingSource, setIsPlayingSource] = useState(false);
+  const [isPlayingTarget, setIsPlayingTarget] = useState(false);
+  const sourceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const targetAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (sourceAudioRef.current) {
+        sourceAudioRef.current.pause();
+        sourceAudioRef.current = null;
+      }
+      if (targetAudioRef.current) {
+        targetAudioRef.current.pause();
+        targetAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  const handlePlaySource = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!entry.sourceText.trim()) return;
+
+    if (isPlayingSource && sourceAudioRef.current) {
+      sourceAudioRef.current.pause();
+      sourceAudioRef.current.currentTime = 0;
+      sourceAudioRef.current = null;
+      setIsPlayingSource(false);
+      return;
+    }
+
+    const langCode = sourceLang === 'auto' ? 'en' : sourceLang;
+    try {
+      setIsPlayingSource(true);
+      const audio = await playTextToSpeech(entry.sourceText.trim(), langCode);
+      sourceAudioRef.current = audio;
+      audio.addEventListener('ended', () => {
+        setIsPlayingSource(false);
+        sourceAudioRef.current = null;
+      });
+      audio.addEventListener('error', () => {
+        setIsPlayingSource(false);
+        sourceAudioRef.current = null;
+      });
+    } catch {
+      setIsPlayingSource(false);
+      sourceAudioRef.current = null;
+    }
+  }, [entry.sourceText, sourceLang, isPlayingSource]);
+
+  const handlePlayTarget = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!entry.translatedText.trim()) return;
+
+    if (isPlayingTarget && targetAudioRef.current) {
+      targetAudioRef.current.pause();
+      targetAudioRef.current.currentTime = 0;
+      targetAudioRef.current = null;
+      setIsPlayingTarget(false);
+      return;
+    }
+
+    try {
+      setIsPlayingTarget(true);
+      const audio = await playTextToSpeech(entry.translatedText.trim(), entry.targetLanguage);
+      targetAudioRef.current = audio;
+      audio.addEventListener('ended', () => {
+        setIsPlayingTarget(false);
+        targetAudioRef.current = null;
+      });
+      audio.addEventListener('error', () => {
+        setIsPlayingTarget(false);
+        targetAudioRef.current = null;
+      });
+    } catch {
+      setIsPlayingTarget(false);
+      targetAudioRef.current = null;
+    }
+  }, [entry.translatedText, entry.targetLanguage, isPlayingTarget]);
+
   const handleSelect = () => {
     onSelect?.(entry.sourceText, entry.translatedText, sourceLang, entry.targetLanguage, parsedMetadata);
   };
@@ -155,17 +238,42 @@ function HistoryCard({
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Source text */}
-          <div>
-            <p className="text-gray-900 dark:text-gray-100 leading-relaxed">
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={handlePlaySource}
+              aria-label={isPlayingSource ? 'Stop source audio' : 'Play source audio'}
+              title={isPlayingSource ? 'Stop' : 'Listen'}
+              className="p-1.5 rounded-md transition-all outline-none flex-shrink-0
+                text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30"
+            >
+              {isPlayingSource ? (
+                <MdStop className="w-4 h-4" aria-hidden="true" />
+              ) : (
+                <FiVolume2 className="w-4 h-4" aria-hidden="true" />
+              )}
+            </button>
+            <p className="text-gray-900 dark:text-gray-100 leading-relaxed flex-1">
               {truncateText(entry.sourceText, 200)}
             </p>
           </div>
 
           {/* Translated text */}
-          <div>
-            <p className="text-gray-900 dark:text-gray-100 leading-relaxed">
-              {truncateText(entry.translatedText, 200)}
-            </p>
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={handlePlayTarget}
+              aria-label={isPlayingTarget ? 'Stop translated audio' : 'Play translated audio'}
+              title={isPlayingTarget ? 'Stop' : 'Listen'}
+              className="p-1.5 rounded-md transition-all outline-none flex-shrink-0
+                text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+            >
+              {isPlayingTarget ? (
+                <MdStop className="w-4 h-4" aria-hidden="true" />
+              ) : (
+                <FiVolume2 className="w-4 h-4" aria-hidden="true" />
+              )}
+            </button>
           </div>
         </div>
       </div>
