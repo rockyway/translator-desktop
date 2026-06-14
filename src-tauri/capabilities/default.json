@@ -17,7 +17,7 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "text-monitor",
+          "name": "text-helper",
           "sidecar": true
         }
       ]

@@ -1,4 +1,4 @@
-# Build the .NET Text Monitor as a self-contained sidecar for Tauri
+# Build the .NET Text Helper as a self-contained sidecar for Tauri
 # This script builds the .NET project and copies the executable to the Tauri binaries folder
 
 $ErrorActionPreference = "Stop"
@@ -11,7 +11,7 @@ if (-not $ProjectRoot) {
 $DotNetProject = Join-Path $ProjectRoot "text-monitor\TextMonitor.Service"
 $OutputDir = Join-Path $ProjectRoot "src-tauri\binaries"
 
-Write-Host "Building .NET Text Monitor sidecar..." -ForegroundColor Cyan
+Write-Host "Building .NET Text Helper sidecar..." -ForegroundColor Cyan
 Write-Host "Project: $DotNetProject"
 Write-Host "Output: $OutputDir"
 
@@ -42,11 +42,11 @@ finally {
 
 # Rename to Tauri sidecar naming convention
 $SourceExe = Join-Path $OutputDir "TextMonitor.Service.exe"
-$TargetExe = Join-Path $OutputDir "text-monitor-x86_64-pc-windows-msvc.exe"
+$TargetExe = Join-Path $OutputDir "text-helper-x86_64-pc-windows-msvc.exe"
 
 if (Test-Path $SourceExe) {
     Move-Item -Force $SourceExe $TargetExe
-    Write-Host "Renamed to: text-monitor-x86_64-pc-windows-msvc.exe" -ForegroundColor Green
+    Write-Host "Renamed to: text-helper-x86_64-pc-windows-msvc.exe" -ForegroundColor Green
 }
 
 # Clean up PDB file
@@ -54,11 +54,6 @@ $PdbFile = Join-Path $OutputDir "TextMonitor.Service.pdb"
 if (Test-Path $PdbFile) {
     Remove-Item $PdbFile
 }
-
-# Copy to src-tauri root for bundling (externalBin: "text-monitor")
-$BundleDir = Join-Path $ProjectRoot "src-tauri"
-Copy-Item -Force $TargetExe $BundleDir
-Write-Host "Copied to bundle location: $BundleDir" -ForegroundColor Cyan
 
 # Copy to target/debug for development mode
 $DevOutputDir = Join-Path $ProjectRoot "src-tauri\target\debug"

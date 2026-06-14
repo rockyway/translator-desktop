@@ -96,7 +96,7 @@ export function useIpcListener(): UseIpcListenerResult {
 
         // Listen for text monitor version events
         unlistenVersion = await listen<TextMonitorVersionPayload>(
-          "text-monitor-version",
+          "text-helper-version",
           (event) => {
             console.log("Text Monitor version:", event.payload.version);
             setTextMonitorVersion(event.payload.version);

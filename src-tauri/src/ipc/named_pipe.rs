@@ -229,8 +229,8 @@ fn handle_message(app_handle: &AppHandle, message: IpcMessage) {
                             timestamp: Utc::now().to_rfc3339(),
                         };
 
-                        if let Err(e) = app_handle.emit("text-monitor-version", &event) {
-                            log::error!("IPC: Failed to emit text-monitor-version event: {}", e);
+                        if let Err(e) = app_handle.emit("text-helper-version", &event) {
+                            log::error!("IPC: Failed to emit text-helper-version event: {}", e);
                         }
                     }
                     Err(e) => {

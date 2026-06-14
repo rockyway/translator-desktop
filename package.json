@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "start": "tauri dev",
     "tauri": "tauri",
     "build:sidecar": "pwsh -File scripts/build-sidecar.ps1",
     "build:all": "npm run build:sidecar && npm run tauri build",

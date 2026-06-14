@@ -107,15 +107,15 @@ pub fn init_job_object() {
     // No-op on non-Windows platforms
 }
 
-/// Kill any existing text-monitor processes to ensure only one instance runs.
+/// Kill any existing text-helper processes to ensure only one instance runs.
 #[cfg(target_os = "windows")]
 fn kill_existing_text_monitor() {
     use std::process::Command;
     use std::os::windows::process::CommandExt;
 
     let names = [
-        "text-monitor-x86_64-pc-windows-msvc.exe",
-        "text-monitor.exe",
+        "text-helper-x86_64-pc-windows-msvc.exe",
+        "text-helper.exe",
     ];
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -166,9 +166,9 @@ impl SidecarState {
 
         kill_existing_text_monitor();
 
-        log::info!("Sidecar: Starting text-monitor...");
+        log::info!("Sidecar: Starting text-helper...");
 
-        let sidecar_command = match app.shell().sidecar("text-monitor") {
+        let sidecar_command = match app.shell().sidecar("text-helper") {
             Ok(cmd) => cmd,
             Err(e) => {
                 let msg = format!("Failed to create sidecar command: {}", e);
@@ -241,7 +241,7 @@ impl SidecarState {
         let mut guard = self.child.lock().await;
 
         if let Some(child) = guard.take() {
-            log::info!("Sidecar: Stopping text-monitor...");
+            log::info!("Sidecar: Stopping text-helper...");
             child
                 .kill()
                 .map_err(|e| format!("Failed to kill sidecar: {}", e))?;
