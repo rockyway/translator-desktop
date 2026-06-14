@@ -29,8 +29,8 @@ dotnet publish \
     -o "$OUTPUT_DIR"
 
 # Rename to Tauri sidecar naming convention
-if [ -f "$OUTPUT_DIR/TextMonitor.Service.exe" ]; then
-    mv "$OUTPUT_DIR/TextMonitor.Service.exe" "$OUTPUT_DIR/text-helper-x86_64-pc-windows-msvc.exe"
+if [ -f "$OUTPUT_DIR/text-helper.exe" ]; then
+    mv "$OUTPUT_DIR/text-helper.exe" "$OUTPUT_DIR/text-helper-x86_64-pc-windows-msvc.exe"
     echo "Renamed to: text-helper-x86_64-pc-windows-msvc.exe"
 fi
 

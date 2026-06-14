@@ -27,7 +27,9 @@ use sqlx::SqlitePool;
 use std::fs;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{Emitter, Manager};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
+use tauri::Manager;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 // Unused imports removed - Code, Modifiers, Shortcut are imported via commands module

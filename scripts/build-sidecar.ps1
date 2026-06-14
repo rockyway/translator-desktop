@@ -41,7 +41,7 @@ finally {
 }
 
 # Rename to Tauri sidecar naming convention
-$SourceExe = Join-Path $OutputDir "TextMonitor.Service.exe"
+$SourceExe = Join-Path $OutputDir "text-helper.exe"
 $TargetExe = Join-Path $OutputDir "text-helper-x86_64-pc-windows-msvc.exe"
 
 if (Test-Path $SourceExe) {
@@ -50,7 +50,7 @@ if (Test-Path $SourceExe) {
 }
 
 # Clean up PDB file
-$PdbFile = Join-Path $OutputDir "TextMonitor.Service.pdb"
+$PdbFile = Join-Path $OutputDir "text-helper.pdb"
 if (Test-Path $PdbFile) {
     Remove-Item $PdbFile
 }
