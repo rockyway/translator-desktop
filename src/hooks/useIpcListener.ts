@@ -53,6 +53,7 @@ export function useIpcListener(): UseIpcListenerResult {
     let unlistenDisconnected: (() => void) | undefined;
     let unlistenVersion: (() => void) | undefined;
     let unlistenAccessibility: (() => void) | undefined;
+    let unlistenAccessibilityGranted: (() => void) | undefined;
 
     const setupListeners = async () => {
       try {
@@ -95,7 +96,7 @@ export function useIpcListener(): UseIpcListenerResult {
 
         // Listen for text monitor version events
         unlistenVersion = await listen<TextMonitorVersionPayload>(
-          "text-monitor-version",
+          "text-helper-version",
           (event) => {
             console.log("Text Monitor version:", event.payload.version);
             setTextMonitorVersion(event.payload.version);
@@ -108,6 +109,15 @@ export function useIpcListener(): UseIpcListenerResult {
           () => {
             console.log("Accessibility permission needed");
             setNeedsAccessibilityPermission(true);
+          }
+        );
+
+        // Listen for macOS accessibility permission granted (after user enables it)
+        unlistenAccessibilityGranted = await listen(
+          "accessibility-permission-granted",
+          () => {
+            console.log("Accessibility permission granted");
+            setNeedsAccessibilityPermission(false);
           }
         );
 
@@ -134,6 +144,9 @@ export function useIpcListener(): UseIpcListenerResult {
       }
       if (unlistenAccessibility) {
         unlistenAccessibility();
+      }
+      if (unlistenAccessibilityGranted) {
+        unlistenAccessibilityGranted();
       }
       console.log("IPC listeners unregistered");
     };

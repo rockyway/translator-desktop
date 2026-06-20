@@ -8,10 +8,12 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "start": "tauri dev",
     "tauri": "tauri",
     "build:sidecar": "pwsh -File scripts/build-sidecar.ps1",
     "build:all": "npm run build:sidecar && npm run tauri build",
-    "build:macos": "npx tauri build --bundles app",
+    "publish": "pwsh -File scripts/publish.ps1",
+    "build:macos": "npx tauri build --bundles app && codesign --force --deep --sign - src-tauri/target/release/bundle/macos/TranslatorDesktop.app",
     "generate:icons": "node scripts/generate-icons.js"
   },
   "dependencies": {

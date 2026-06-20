@@ -7,8 +7,9 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>TextMonitor.Service</RootNamespace>
-    <AssemblyName>TextMonitor.Service</AssemblyName>
-    <Description>Text selection monitoring service for translator-desktop</Description>
+    <AssemblyName>text-helper</AssemblyName>
+    <Product>Text Helper</Product>
+    <Description>Text Helper service for Translator Desktop</Description>
   </PropertyGroup>
 
   <ItemGroup>

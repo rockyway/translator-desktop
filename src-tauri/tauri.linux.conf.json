@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TranslatorDesktop",
+        "width": 900,
+        "height": 980,
+        "minWidth": 600,
+        "minHeight": 400,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      },
+      {
+        "label": "popup",
+        "title": "Quick Translate",
+        "width": 380,
+        "height": 320,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": true,
+        "minWidth": 300,
+        "minHeight": 200,
+        "center": false,
+        "focus": true
+      },
+      {
+        "label": "confirmation",
+        "title": "Confirm Translation",
+        "width": 400,
+        "height": 280,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false,
+        "center": false,
+        "focus": true
+      }
+    ]
+  }
+}
