@@ -50,6 +50,38 @@ fn get_ipc_status() -> bool {
     is_ipc_connected()
 }
 
+/// GitHub repository used as the Velopack update source.
+const UPDATE_REPO_URL: &str = "https://github.com/rockyway/translator-desktop";
+
+/// Check GitHub releases for a newer version and, if found, download and install it.
+/// Returns `true` when an update was applied (the process will restart), `false` when
+/// the app is already up to date. Runs the blocking Velopack work off the async runtime.
+#[tauri::command]
+async fn check_and_install_update() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        use velopack::{sources::GithubSource, UpdateCheck, UpdateManager};
+
+        let source = GithubSource::new(UPDATE_REPO_URL, None, false);
+        let manager = UpdateManager::new(source, None, None).map_err(|e| e.to_string())?;
+
+        match manager.check_for_updates().map_err(|e| e.to_string())? {
+            UpdateCheck::UpdateAvailable(updates) => {
+                manager
+                    .download_updates(&updates, None)
+                    .map_err(|e| e.to_string())?;
+                // This restarts the process to apply the update; code after rarely runs.
+                manager
+                    .apply_updates_and_restart(&*updates)
+                    .map_err(|e| e.to_string())?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Check if macOS Accessibility permission is granted.
 /// Returns true on non-macOS platforms.
 #[tauri::command]
@@ -228,8 +260,9 @@ pub fn run() {
             let app_name_item = MenuItem::with_id(app, "app_name", "Translator Desktop", false, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+            let update_item = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
             let exit_item = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&app_name_item, &separator, &show_item, &exit_item])?;
+            let tray_menu = Menu::with_items(app, &[&app_name_item, &separator, &show_item, &update_item, &exit_item])?;
 
             // Build the tray icon
             let _tray = TrayIconBuilder::new()
@@ -245,6 +278,15 @@ pub fn run() {
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
+                        }
+                        "check_update" => {
+                            tauri::async_runtime::spawn(async {
+                                match check_and_install_update().await {
+                                    Ok(true) => log::info!("Update found; downloading and restarting"),
+                                    Ok(false) => log::info!("No update available; already up to date"),
+                                    Err(e) => log::error!("Update check failed: {}", e),
+                                }
+                            });
                         }
                         "exit" => {
                             FORCE_EXIT.store(true, Ordering::SeqCst);
@@ -646,7 +688,8 @@ pub fn run() {
             respond_to_confirmation,
             get_confirmation_data,
             check_accessibility_permission,
-            request_accessibility_permission
+            request_accessibility_permission,
+            check_and_install_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

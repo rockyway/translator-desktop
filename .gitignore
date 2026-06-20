@@ -28,6 +28,9 @@ src-tauri/target/
 src-tauri/binaries/
 src-tauri/text-helper-x86_64-pc-windows-msvc.exe
 
+# Velopack publish output (staging + release feed)
+/target/
+
 # TypeScript
 tsconfig.tsbuildinfo
 

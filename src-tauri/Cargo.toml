@@ -39,6 +39,7 @@ chrono = "0.4"
 thiserror = "1"
 urlencoding = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
+velopack = "1.2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse"] }
