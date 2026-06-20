@@ -253,9 +253,16 @@ function HistoryCard({
                 <FiVolume2 className="w-4 h-4" aria-hidden="true" />
               )}
             </button>
-            <p className="text-gray-900 dark:text-gray-100 leading-relaxed flex-1">
-              {truncateText(entry.sourceText, 200)}
-            </p>
+            <div className="flex-1 min-w-0">
+              <p className="text-gray-900 dark:text-gray-100 leading-relaxed">
+                {truncateText(entry.sourceText, 200)}
+              </p>
+              {parsedMetadata?.transliteration && (
+                <p className="mt-0.5 text-sm text-amber-600 dark:text-amber-400 font-mono italic">
+                  {parsedMetadata.transliteration}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Translated text */}
@@ -274,6 +281,9 @@ function HistoryCard({
                 <FiVolume2 className="w-4 h-4" aria-hidden="true" />
               )}
             </button>
+            <p className="text-blue-700 dark:text-blue-300 leading-relaxed flex-1">
+              {truncateText(entry.translatedText, 200)}
+            </p>
           </div>
         </div>
       </div>
