@@ -236,5 +236,6 @@ Reading PROJECT_STRUCTURE.md will significantly speed up exploration tasks.
 | Resource | Location |
 |----------|----------|
 | **Project Structure** | `PROJECT_STRUCTURE.md` |
+| WebView2 idle GPU usage | `docs/troubleshooting/001-webview2-idle-gpu-usage.md` |
 | Migration Plan | `docs/plan/001-desktop-migration-plan.md` |
 | Original PRD | `../translator-app/docs/requirement/prd.md` |
