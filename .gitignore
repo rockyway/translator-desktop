@@ -27,6 +27,8 @@ dist-ssr
 src-tauri/target/
 src-tauri/binaries/
 src-tauri/text-helper-x86_64-pc-windows-msvc.exe
+# Stale sidecar binary left over from the text-monitor -> text-helper rename
+src-tauri/text-monitor-x86_64-pc-windows-msvc.exe
 
 # Velopack publish output (staging + release feed)
 /target/
