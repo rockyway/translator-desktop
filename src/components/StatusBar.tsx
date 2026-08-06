@@ -56,12 +56,16 @@ export const StatusBar = memo(function StatusBar({
       <div className="flex items-center gap-2">
         {/* Status indicator dot */}
         <span className="relative flex h-2 w-2">
+          {/*
+            Deliberately not animated. `animate-pulse` here ran for the whole life of
+            the app, and because a hidden Tauri window keeps its WebView2 compositing,
+            it burned GPU even while minimised to the tray.
+          */}
           <span
             className={`
               absolute inline-flex h-full w-full rounded-full opacity-60
-              ${isActive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}
+              ${isActive ? 'bg-emerald-400' : 'bg-amber-400'}
             `}
-            style={{ animationDuration: isActive ? '2.5s' : undefined }}
           />
           <span
             className={`

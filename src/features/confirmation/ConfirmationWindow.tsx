@@ -139,14 +139,17 @@ export function ConfirmationWindow() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isReady, handleConfirm, handleCancel]);
 
-  // Loading state - subtle spinner while waiting for data
+  // Idle/loading state - deliberately static.
+  //
+  // This is the window's resting state: it is reset to `isReady = false` on every
+  // focus loss, so anything animated here would run for the entire lifetime of the
+  // app in a window nobody can see. An animated spinner here kept the shared
+  // WebView2 GPU process busy 24/7. Keep this branch animation-free.
   if (!isReady) {
-    console.log('[ConfirmationWindow] Rendering loading spinner (isReady=false, charCount=%d)', charCount);
+    console.log('[ConfirmationWindow] Rendering idle placeholder (isReady=false, charCount=%d)', charCount);
     return (
       <ThemeProvider>
-        <div className="w-full h-full flex items-center justify-center bg-white/95 dark:bg-gray-900/95">
-          <div className="animate-spin w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full" />
-        </div>
+        <div className="w-full h-full bg-white/95 dark:bg-gray-900/95" />
       </ThemeProvider>
     );
   }

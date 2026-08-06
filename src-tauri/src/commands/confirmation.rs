@@ -160,7 +160,7 @@ pub async fn show_translation_confirmation(
     }
 
     log::info!("[CONFIRMATION] Showing window...");
-    if let Err(e) = window.show() {
+    if let Err(e) = crate::window_visibility::show_window(&window) {
         log::error!("[CONFIRMATION] Failed to show confirmation window: {}", e);
         return false;
     }
@@ -198,18 +198,18 @@ pub async fn show_translation_confirmation(
     match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
         Ok(Ok(confirmed)) => {
             // Hide window after response
-            let _ = window.hide();
+            let _ = crate::window_visibility::hide_window(&window);
             log::info!("Confirmation: User responded with {}", confirmed);
             confirmed
         }
         Ok(Err(_)) => {
             log::warn!("Confirmation: Channel closed");
-            let _ = window.hide();
+            let _ = crate::window_visibility::hide_window(&window);
             false
         }
         Err(_) => {
             log::warn!("Confirmation: Timeout after 30 seconds");
-            let _ = window.hide();
+            let _ = crate::window_visibility::hide_window(&window);
             false
         }
     }

@@ -130,7 +130,7 @@ pub fn show_popup_with_text(app_handle: &AppHandle, text: String, cursor_x: i32,
 
                 // macOS: Skip vibrancy — transparent windows cause click-through issues
 
-                if let Err(e) = window.show() {
+                if let Err(e) = crate::window_visibility::show_window(&window) {
                     log::error!("Popup: Failed to show popup: {}", e);
                     return;
                 }

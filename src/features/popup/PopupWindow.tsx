@@ -71,25 +71,18 @@ export function PopupWindow() {
     metadata?: TranslationMetadata
   ) => {
     try {
-      // Get the main window and show/focus it
-      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-      const mainWindow = await WebviewWindow.getByLabel('main');
+      // Emit event to main window with the content to transfer
+      await emit('open-main-with-content', {
+        sourceText,
+        translatedText,
+        sourceLang,
+        targetLang,
+        metadata,
+      });
 
-      if (mainWindow) {
-        // Emit event to main window with the content to transfer
-        await emit('open-main-with-content', {
-          sourceText,
-          translatedText,
-          sourceLang,
-          targetLang,
-          metadata,
-        });
-
-        await mainWindow.show();
-        await mainWindow.setFocus();
-      } else {
-        console.warn('Main window not found');
-      }
+      // Must go through Rust: a plain `mainWindow.show()` only shows the window,
+      // leaving the webview suspended (blank) after a minimise-to-tray.
+      await invoke('show_main_window');
 
       await invoke('hide_popup');
     } catch (error) {

@@ -138,8 +138,7 @@ pub async fn show_popup(app: AppHandle, x: i32, y: i32, keep_position: Option<bo
     }
 
     // Show and focus the window
-    window
-        .show()
+    crate::window_visibility::show_window(&window)
         .map_err(|e| format!("Failed to show popup: {}", e))?;
 
     window
@@ -156,8 +155,7 @@ pub async fn hide_popup(app: AppHandle) -> Result<(), String> {
         .get_webview_window("popup")
         .ok_or_else(|| "Popup window not found".to_string())?;
 
-    window
-        .hide()
+    crate::window_visibility::hide_window(&window)
         .map_err(|e| format!("Failed to hide popup: {}", e))?;
 
     log::info!("Popup hidden");

@@ -23,5 +23,5 @@ pub use speak::speak;
 pub use translate::{translate, HttpClientState};
 pub use window::{
     apply_acrylic_effect, apply_mica_effect, close_window, is_window_maximized, minimize_window,
-    start_drag_window, toggle_maximize_window,
+    show_main_window, start_drag_window, toggle_maximize_window,
 };

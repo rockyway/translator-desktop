@@ -4,6 +4,7 @@ mod commands;
 mod ipc;
 mod popup_handler;
 mod sidecar;
+mod window_visibility;
 #[cfg(target_os = "macos")]
 mod macos_monitor;
 
@@ -13,7 +14,8 @@ use commands::{
     get_setting, handle_global_hotkey, hide_popup, init_config_store, init_database,
     is_autostart_enabled, is_popup_visible, is_window_maximized, minimize_window, resize_popup,
     respond_to_confirmation, search_history, set_autostart_enabled, set_popup_text, set_setting,
-    show_popup, simulate_copy, speak, start_drag_window, toggle_maximize_window, translate,
+    show_main_window, show_popup, simulate_copy, speak, start_drag_window, toggle_maximize_window,
+    translate,
     trigger_hotkey_translate, update_global_hotkey, update_selection_modifier,
     ConfirmationDataState, ConfirmationState, DbState, HotkeyState, HttpClientState,
     PopupTextState,
@@ -199,28 +201,22 @@ pub fn run() {
             Some(vec!["--minimized"]), // Start minimized when auto-launched
         ))
         .plugin(tauri_plugin_shell::init())
+        // Register state on the builder, NOT inside `setup`.
+        //
+        // Config-declared windows begin loading before `setup` runs, so their frontends
+        // can invoke commands first. Registering in `setup` lost that race and panicked
+        // with "state() called before manage() for PopupTextState" — the popup window
+        // calls `get_popup_text` on mount. Builder-level state exists before any window.
+        .manage(PopupTextState::default())
+        .manage(SidecarState::new())
+        .manage(HotkeyState::default())
+        .manage(ConfirmationState::default())
+        .manage(ConfirmationDataState::default())
+        // Shared HTTP client — created once to avoid TLS/connection pool setup per request
+        .manage(HttpClientState::default())
         .setup(|app| {
             // Initialize job object to ensure child processes terminate with parent
             init_job_object();
-
-            // Initialize popup text state
-            app.manage(PopupTextState::default());
-
-            // Initialize sidecar state for text monitor
-            app.manage(SidecarState::new());
-
-            // Initialize hotkey state with default
-            app.manage(HotkeyState::default());
-
-            // Initialize confirmation state for character limit dialog
-            app.manage(ConfirmationState::default());
-
-            // Initialize confirmation data state for React to fetch on mount
-            app.manage(ConfirmationDataState::default());
-
-            // Initialize shared HTTP client for translation requests
-            // Creating once avoids TLS/connection pool setup on first request
-            app.manage(HttpClientState::default());
 
             // Apply window effects per platform
             #[cfg(target_os = "windows")]
@@ -244,6 +240,15 @@ pub fn run() {
             }
 
             // macOS: Skip vibrancy — transparent windows cause click-through issues
+
+            // The popup/confirmation windows are declared `"visible": false`, but their
+            // webviews are still created visible and would render (and burn GPU) for the
+            // whole session. Suspend them until something actually shows the window.
+            for label in ["popup", "confirmation"] {
+                if let Some(window) = app.get_webview_window(label) {
+                    window_visibility::suspend_hidden_webview(&window);
+                }
+            }
 
             // Create system tray icon with context menu
             let icon_bytes = include_bytes!("../icons/32x32.png");
@@ -275,7 +280,7 @@ pub fn run() {
                             #[cfg(target_os = "macos")]
                             let _ = app.set_dock_visibility(true);
                             if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
+                                let _ = window_visibility::show_window(&window);
                                 let _ = window.set_focus();
                             }
                         }
@@ -311,7 +316,7 @@ pub fn run() {
                         #[cfg(target_os = "macos")]
                         let _ = app.set_dock_visibility(true);
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
+                            let _ = window_visibility::show_window(&window);
                             let _ = window.set_focus();
                         }
                     }
@@ -625,7 +630,6 @@ pub fn run() {
 
                     // Check minimize_to_tray setting
                     let app_handle = window.app_handle().clone();
-                    let window_clone = window.clone();
 
                     // Prevent the default close behavior
                     api.prevent_close();
@@ -634,8 +638,12 @@ pub fn run() {
                         let minimize_to_tray = get_minimize_to_tray_setting(&app_handle).await;
 
                         if minimize_to_tray {
-                            // Hide window to tray instead of closing
-                            let _ = window_clone.hide();
+                            // Hide window to tray instead of closing.
+                            // Looked up as a WebviewWindow so the webview is suspended too —
+                            // the event handler only hands us a `Window`.
+                            if let Some(main_window) = app_handle.get_webview_window("main") {
+                                let _ = window_visibility::hide_window(&main_window);
+                            }
                             #[cfg(target_os = "macos")]
                             let _ = app_handle.set_dock_visibility(false);
                         } else {
@@ -682,6 +690,7 @@ pub fn run() {
             close_window,
             is_window_maximized,
             start_drag_window,
+            show_main_window,
             exit_app,
             is_autostart_enabled,
             set_autostart_enabled,

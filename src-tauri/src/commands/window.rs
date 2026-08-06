@@ -1,4 +1,4 @@
-use tauri::Window;
+use tauri::{AppHandle, Manager, Window};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
@@ -77,5 +77,19 @@ pub fn is_window_maximized(window: Window) -> Result<bool, WindowError> {
 #[tauri::command]
 pub fn start_drag_window(window: Window) -> Result<(), WindowError> {
     window.start_dragging()?;
+    Ok(())
+}
+
+/// Show and focus the main window.
+///
+/// Goes through `window_visibility` so the webview is resumed too — showing the
+/// main window from the frontend with a plain `show()` would render it blank
+/// after it had been hidden to the tray.
+#[tauri::command]
+pub fn show_main_window(app: AppHandle) -> Result<(), WindowError> {
+    if let Some(window) = app.get_webview_window("main") {
+        crate::window_visibility::show_window(&window)?;
+        window.set_focus()?;
+    }
     Ok(())
 }
