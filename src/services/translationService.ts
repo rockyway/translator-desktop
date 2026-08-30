@@ -41,6 +41,13 @@ export interface Synonym {
 }
 
 /**
+ * Antonym entry
+ */
+export interface Antonym {
+  word: string;
+}
+
+/**
  * Related word entry
  */
 export interface RelatedWord {
@@ -48,13 +55,14 @@ export interface RelatedWord {
 }
 
 /**
- * Translation metadata containing examples, definitions, alternatives, synonyms, related words, and transliteration
+ * Translation metadata containing examples, definitions, alternatives, synonyms, antonyms, related words, and transliteration
  */
 export interface TranslationMetadata {
   examples: TranslationExample[];
   definitions: Definition[];
   alternatives: AlternativeTranslation[];
   synonyms: Synonym[];
+  antonyms: Antonym[];
   relatedWords: RelatedWord[];
   transliteration?: string;
 }

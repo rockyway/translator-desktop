@@ -46,6 +46,13 @@ pub struct Synonym {
     pub word: String,
 }
 
+/// Antonym entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Antonym {
+    pub word: String,
+}
+
 /// Related word entry (no longer populated - kept for frontend shape compatibility)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +68,7 @@ pub struct TranslationMetadata {
     pub definitions: Vec<Definition>,
     pub alternatives: Vec<AlternativeTranslation>,
     pub synonyms: Vec<Synonym>,
+    pub antonyms: Vec<Antonym>,
     pub related_words: Vec<RelatedWord>,
     pub transliteration: Option<String>,
 }
@@ -115,6 +123,8 @@ struct DictSense {
     examples: Vec<String>,
     #[serde(default)]
     synonyms: Vec<String>,
+    #[serde(default)]
+    antonyms: Vec<String>,
 }
 
 /// Look up dictionary metadata (definitions, examples, synonyms, pronunciation) for a
@@ -168,6 +178,7 @@ pub async fn get_dictionary_metadata(
     let mut definitions = Vec::new();
     let mut examples = Vec::new();
     let mut synonyms = Vec::new();
+    let mut antonyms = Vec::new();
     let mut transliteration = None;
 
     for entry in &parsed.entries {
@@ -207,12 +218,20 @@ pub async fn get_dictionary_metadata(
                     });
                 }
             }
+            for antonym_word in &sense.antonyms {
+                if antonyms.len() < 10 {
+                    antonyms.push(Antonym {
+                        word: antonym_word.clone(),
+                    });
+                }
+            }
         }
     }
 
     if definitions.is_empty()
         && examples.is_empty()
         && synonyms.is_empty()
+        && antonyms.is_empty()
         && transliteration.is_none()
     {
         return Ok(None);
@@ -223,6 +242,7 @@ pub async fn get_dictionary_metadata(
         definitions,
         alternatives: Vec::new(),
         synonyms,
+        antonyms,
         related_words: Vec::new(),
         transliteration,
     }))
@@ -244,7 +264,7 @@ mod tests {
                     "definition": "A greeting.",
                     "examples": ["Hello, everyone."],
                     "synonyms": ["hi"],
-                    "antonyms": [],
+                    "antonyms": ["goodbye"],
                     "tags": []
                 }]
             }]
@@ -255,6 +275,8 @@ mod tests {
         assert_eq!(parsed.entries[0].part_of_speech, "interjection");
         assert_eq!(parsed.entries[0].pronunciations[0].text, "/hɛˈloʊ/");
         assert_eq!(parsed.entries[0].senses[0].definition, "A greeting.");
+        assert_eq!(parsed.entries[0].senses[0].synonyms, vec!["hi"]);
+        assert_eq!(parsed.entries[0].senses[0].antonyms, vec!["goodbye"]);
     }
 
     #[test]

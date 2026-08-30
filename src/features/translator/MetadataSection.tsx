@@ -6,6 +6,7 @@ import {
   FiLayers,
   FiLink,
   FiMessageCircle,
+  FiXCircle,
 } from 'react-icons/fi';
 import type { TranslationMetadata } from '../../services/translationService';
 
@@ -342,6 +343,7 @@ export function MetadataSection({
   const hasAlternatives =
     metadata.alternatives && metadata.alternatives.length > 0;
   const hasSynonyms = metadata.synonyms && metadata.synonyms.length > 0;
+  const hasAntonyms = metadata.antonyms && metadata.antonyms.length > 0;
   const hasRelatedWords =
     metadata.relatedWords && metadata.relatedWords.length > 0;
 
@@ -351,6 +353,7 @@ export function MetadataSection({
     !hasDefinitions &&
     !hasAlternatives &&
     !hasSynonyms &&
+    !hasAntonyms &&
     !hasRelatedWords
   ) {
     return null;
@@ -424,6 +427,19 @@ export function MetadataSection({
             badge={metadata.synonyms.length}
           >
             <WordListSection words={metadata.synonyms} accentColor="emerald" />
+          </CollapsibleCard>
+        )}
+
+        {/* Antonyms */}
+        {hasAntonyms && (
+          <CollapsibleCard
+            title="Antonyms"
+            icon={<FiXCircle className="w-4 h-4" />}
+            accentColor="slate"
+            defaultExpanded={true}
+            badge={metadata.antonyms.length}
+          >
+            <WordListSection words={metadata.antonyms} accentColor="slate" />
           </CollapsibleCard>
         )}
 
