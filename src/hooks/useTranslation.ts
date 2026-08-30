@@ -95,37 +95,23 @@ export function useTranslation(
   // Guards against a stale metadata fetch overwriting state after a newer translation started
   const metadataRequestIdRef = useRef(0);
 
-  // Translation mutation using React Query
-  const mutation = useMutation<
-    TranslationResult,
-    TranslationError | Error,
-    string
-  >({
-    mutationFn: async (text: string) => {
-      return translateText(text, {
-        from: sourceLanguage,
-        to: targetLanguage,
-      });
-    },
-    onSuccess: async (data, sourceText) => {
-      // Save to history using the sourceText from the mutation call (captured at mutation time)
-      // This prevents the race condition where pendingText changes before translation completes
-      lastTranslatedTextRef.current = sourceText;
-      setMetadata(undefined);
-
-      if (!sourceText.trim()) return;
-
-      // Fetch supplementary dictionary metadata (definitions/examples/synonyms) for short
-      // text, without delaying the translated text that's already visible by this point.
-      const trimmedText = sourceText.trim();
-      const wordCount = trimmedText.split(/\s+/).length;
+  // Fetches supplementary dictionary metadata (definitions/examples/synonyms/antonyms) for
+  // short text and saves the translation to history. Deliberately NOT awaited by onSuccess
+  // below: TanStack Query's mutation only dispatches its "success" state (which flips
+  // isPending to false and populates `data`) *after* onSuccess's returned promise settles.
+  // Awaiting this here previously meant the whole popup sat on "Translating..." for as long
+  // as the dictionary lookup + history write took, even though the translation itself had
+  // already come back.
+  const fetchMetadataAndSaveHistory = useCallback(
+    async (sourceText: string, data: TranslationResult) => {
+      const wordCount = sourceText.split(/\s+/).length;
       const requestId = ++metadataRequestIdRef.current;
 
       let fetchedMetadata: TranslationMetadata | undefined;
       if (wordCount <= DICTIONARY_LOOKUP_MAX_WORDS) {
         const lookupLanguage =
           sourceLanguage !== 'auto' ? sourceLanguage : data.detectedLanguage ?? 'en';
-        fetchedMetadata = await getDictionaryMetadata(trimmedText, lookupLanguage);
+        fetchedMetadata = await getDictionaryMetadata(sourceText, lookupLanguage);
 
         if (isMountedRef.current && requestId === metadataRequestIdRef.current) {
           setMetadata(fetchedMetadata);
@@ -147,6 +133,33 @@ export function useTranslation(
         // Silently log error - don't break the translation flow
         console.error('Failed to save translation to history:', error);
       }
+    },
+    [sourceLanguage, targetLanguage]
+  );
+
+  // Translation mutation using React Query
+  const mutation = useMutation<
+    TranslationResult,
+    TranslationError | Error,
+    string
+  >({
+    mutationFn: async (text: string) => {
+      return translateText(text, {
+        from: sourceLanguage,
+        to: targetLanguage,
+      });
+    },
+    onSuccess: (data, sourceText) => {
+      // Save to history using the sourceText from the mutation call (captured at mutation time)
+      // This prevents the race condition where pendingText changes before translation completes
+      lastTranslatedTextRef.current = sourceText;
+      setMetadata(undefined);
+
+      const trimmedText = sourceText.trim();
+      if (!trimmedText) return;
+
+      // Fire-and-forget - see the comment on fetchMetadataAndSaveHistory above.
+      void fetchMetadataAndSaveHistory(trimmedText, data);
     },
   });
 
