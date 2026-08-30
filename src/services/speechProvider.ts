@@ -102,46 +102,6 @@ function pickVoiceForLanguage(languageCode: string): SpeechSynthesisVoice | null
   );
 }
 
-/** Maps this app's language codes to openai-edge-tts (Microsoft Edge neural) voice names. */
-const EDGE_TTS_VOICES: Record<string, string> = {
-  ar: 'ar-SA-HamedNeural',
-  bg: 'bg-BG-BorislavNeural',
-  'zh-cn': 'zh-CN-XiaoxiaoNeural',
-  'zh-tw': 'zh-TW-HsiaoChenNeural',
-  cs: 'cs-CZ-AntoninNeural',
-  da: 'da-DK-ChristelNeural',
-  nl: 'nl-NL-ColetteNeural',
-  en: 'en-US-AriaNeural',
-  fi: 'fi-FI-SelmaNeural',
-  fr: 'fr-FR-DeniseNeural',
-  de: 'de-DE-KatjaNeural',
-  el: 'el-GR-AthinaNeural',
-  he: 'he-IL-AvriNeural',
-  hi: 'hi-IN-SwaraNeural',
-  hu: 'hu-HU-NoemiNeural',
-  id: 'id-ID-GadisNeural',
-  it: 'it-IT-ElsaNeural',
-  ja: 'ja-JP-NanamiNeural',
-  ko: 'ko-KR-SunHiNeural',
-  ms: 'ms-MY-YasminNeural',
-  no: 'nb-NO-PernilleNeural',
-  pl: 'pl-PL-AgnieszkaNeural',
-  pt: 'pt-PT-RaquelNeural',
-  ro: 'ro-RO-AlinaNeural',
-  ru: 'ru-RU-SvetlanaNeural',
-  es: 'es-ES-ElviraNeural',
-  sv: 'sv-SE-SofieNeural',
-  th: 'th-TH-PremwadeeNeural',
-  tr: 'tr-TR-EmelNeural',
-  uk: 'uk-UA-PolinaNeural',
-  vi: 'vi-VN-HoaiMyNeural',
-};
-
-/** Falls back to an English voice for a language code with no explicit mapping. */
-function voiceForLanguage(languageCode: string): string {
-  return EDGE_TTS_VOICES[languageCode.toLowerCase()] ?? EDGE_TTS_VOICES.en;
-}
-
 /**
  * In-memory cache of base64 MP3 audio keyed by "voice:text", so repeating the
  * same word/sentence in the same session replays instantly instead of hitting
@@ -188,20 +148,18 @@ function setCachedTts(key: string, base64Mp3: string): void {
 }
 
 /**
- * Uses a self-hosted openai-edge-tts server (github.com/travisvn/openai-edge-tts),
- * which wraps Microsoft Edge's online neural voices. Requires the server to be
- * running (see the "Text-to-Speech" section in Settings for the server URL) -
- * covers far more languages/quality than locally installed OS voices, at the
- * cost of a network dependency on infrastructure the user runs themselves.
+ * Uses the official Google Cloud Text-to-Speech API (Chirp 3: HD voices) - see the
+ * "Text-to-Speech" section in Settings for the API key. Covers far more languages
+ * and higher voice quality than locally installed OS voices, at the cost of a paid
+ * Google Cloud API call per (uncached) request.
  */
-export const edgeTtsProvider: SpeechProvider = {
+export const googleTtsProvider: SpeechProvider = {
   async speak(text: string, languageCode: string): Promise<SpeechHandle> {
-    const voice = voiceForLanguage(languageCode);
-    const cacheKey = `${voice}:${text}`;
+    const cacheKey = `${languageCode.toLowerCase()}:${text}`;
 
     let base64Mp3 = getCachedTts(cacheKey);
     if (!base64Mp3) {
-      base64Mp3 = await invoke<string>('speak_edge_tts', { text, voice });
+      base64Mp3 = await invoke<string>('speak_google_tts', { text, languageCode });
       setCachedTts(cacheKey, base64Mp3);
     }
 
@@ -223,4 +181,4 @@ export const edgeTtsProvider: SpeechProvider = {
 };
 
 /** The provider currently used for all text-to-speech playback. */
-export const activeSpeechProvider: SpeechProvider = edgeTtsProvider;
+export const activeSpeechProvider: SpeechProvider = googleTtsProvider;

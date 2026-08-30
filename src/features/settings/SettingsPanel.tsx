@@ -1,10 +1,11 @@
-import { useState, useCallback, useEffect } from 'react';
-import { FiCheck, FiMoon, FiSun, FiMonitor, FiType, FiAlertCircle, FiEye, FiEyeOff, FiInfo } from 'react-icons/fi';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { FiCheck, FiMoon, FiSun, FiMonitor, FiType, FiAlertCircle, FiEye, FiEyeOff, FiInfo, FiX, FiPlus } from 'react-icons/fi';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
 import { useSettings } from '../../hooks/useSettings';
 import type { Theme, SelectionModifier, HotkeyModifier, DensityPreset } from '../../contexts/SettingsContext';
 import { DENSITY_VALUES } from '../../contexts/SettingsContext';
+import { getTargetLanguages } from '../../services/translationService';
 
 // ============================================================================
 // Types
@@ -141,11 +142,57 @@ const SAVED_INDICATOR_DURATION = 1500;
 /** config_store key holding the Google Cloud Translation API key */
 const GOOGLE_TRANSLATE_API_KEY_SETTING = 'google_translate_api_key';
 
-/** config_store key holding the openai-edge-tts server base URL */
-const EDGE_TTS_BASE_URL_SETTING = 'edge_tts_base_url';
+/** config_store key holding an optional, Text-to-Speech-specific API key override */
+const GOOGLE_TTS_API_KEY_SETTING = 'google_tts_api_key';
 
-/** Default openai-edge-tts server URL (matches the Rust command's default) */
-const DEFAULT_EDGE_TTS_URL = 'http://localhost:5050';
+/** config_store key holding the default Chirp 3 HD voice name (used for any language without its own override) */
+const GOOGLE_TTS_DEFAULT_VOICE_SETTING = 'google_tts_default_voice';
+
+/** config_store key holding a JSON object of `{ languageCode: voiceName }` per-language voice overrides */
+const GOOGLE_TTS_VOICE_OVERRIDES_SETTING = 'google_tts_voice_overrides';
+
+/** Voice used until the user picks one - matches the Rust command's fallback */
+const DEFAULT_CHIRP3_VOICE = 'Kore';
+
+/**
+ * All Chirp 3 HD voice personalities (docs.cloud.google.com/text-to-speech/docs/chirp3-hd).
+ * Each name is available across every Chirp 3 HD locale, so this list doesn't vary by language.
+ */
+const CHIRP3_HD_VOICES: { name: string; gender: 'Female' | 'Male' }[] = [
+  { name: 'Achernar', gender: 'Female' },
+  { name: 'Achird', gender: 'Male' },
+  { name: 'Algenib', gender: 'Male' },
+  { name: 'Algieba', gender: 'Male' },
+  { name: 'Alnilam', gender: 'Male' },
+  { name: 'Aoede', gender: 'Female' },
+  { name: 'Autonoe', gender: 'Female' },
+  { name: 'Callirrhoe', gender: 'Female' },
+  { name: 'Charon', gender: 'Male' },
+  { name: 'Despina', gender: 'Female' },
+  { name: 'Enceladus', gender: 'Male' },
+  { name: 'Erinome', gender: 'Female' },
+  { name: 'Fenrir', gender: 'Male' },
+  { name: 'Gacrux', gender: 'Female' },
+  { name: 'Iapetus', gender: 'Male' },
+  { name: 'Kore', gender: 'Female' },
+  { name: 'Laomedeia', gender: 'Female' },
+  { name: 'Leda', gender: 'Female' },
+  { name: 'Orus', gender: 'Male' },
+  { name: 'Pulcherrima', gender: 'Female' },
+  { name: 'Puck', gender: 'Male' },
+  { name: 'Rasalgethi', gender: 'Male' },
+  { name: 'Sadachbia', gender: 'Male' },
+  { name: 'Sadaltager', gender: 'Male' },
+  { name: 'Schedar', gender: 'Male' },
+  { name: 'Sulafat', gender: 'Female' },
+  { name: 'Umbriel', gender: 'Male' },
+  { name: 'Vindemiatrix', gender: 'Female' },
+  { name: 'Zephyr', gender: 'Female' },
+  { name: 'Zubenelgenubi', gender: 'Male' },
+];
+
+/** Language codes Chirp 3 HD doesn't cover yet - these always use a fixed Standard-tier voice (see tts.rs). */
+const NON_CHIRP3_LANGUAGE_CODES = new Set(['ms', 'zh-TW']);
 
 // ============================================================================
 // Sub-Components
@@ -200,8 +247,8 @@ function SettingRow({ label, description, children }: SettingRowProps) {
 /** Google Cloud Console page for creating/restricting API keys */
 const GOOGLE_CLOUD_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
 
-/** openai-edge-tts GitHub repo */
-const OPENAI_EDGE_TTS_REPO_URL = 'https://github.com/travisvn/openai-edge-tts';
+/** Google Cloud Text-to-Speech pricing page */
+const GOOGLE_TTS_PRICING_URL = 'https://cloud.google.com/text-to-speech/pricing';
 
 interface InfoTooltipProps {
   title: string;
@@ -531,6 +578,149 @@ function DensitySelector({
   );
 }
 
+interface VoiceSelectProps {
+  value: string;
+  onChange: (voice: string) => void;
+  id?: string;
+  'aria-label'?: string;
+}
+
+/** A `<select>` listing every Chirp 3 HD voice as "Name (Gender)". */
+function VoiceSelect({ value, onChange, id, ...aria }: VoiceSelectProps) {
+  return (
+    <select
+      id={id}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={aria['aria-label']}
+      className="px-3 py-2 text-sm rounded-lg
+        bg-gray-100 dark:bg-gray-700
+        border border-gray-200 dark:border-gray-600
+        focus:ring-2 focus:ring-amber-500 focus:outline-none
+        text-gray-900 dark:text-gray-100"
+    >
+      {CHIRP3_HD_VOICES.map((voice) => (
+        <option key={voice.name} value={voice.name}>
+          {voice.name} ({voice.gender})
+        </option>
+      ))}
+    </select>
+  );
+}
+
+interface PerLanguageVoiceEditorProps {
+  /** All languages Chirp 3 HD supports, i.e. excluding NON_CHIRP3_LANGUAGE_CODES */
+  languages: { code: string; name: string }[];
+  overrides: Record<string, string>;
+  defaultVoice: string;
+  onAdd: (languageCode: string, voice: string) => void;
+  onRemove: (languageCode: string) => void;
+}
+
+/**
+ * Lets the user add a handful of "language -> voice" favorites instead of picking a
+ * voice for every language. Languages not listed here fall back to the default voice.
+ */
+function PerLanguageVoiceEditor({
+  languages,
+  overrides,
+  defaultVoice,
+  onAdd,
+  onRemove,
+}: PerLanguageVoiceEditorProps) {
+  const [pendingLanguage, setPendingLanguage] = useState('');
+  const [pendingVoice, setPendingVoice] = useState(defaultVoice);
+
+  const availableLanguages = languages.filter((lang) => !(lang.code in overrides));
+
+  const handleLanguageChange = (code: string) => {
+    setPendingLanguage(code);
+    // Suggest the current default voice as a starting point; the user can still change it.
+    setPendingVoice(defaultVoice);
+  };
+
+  const handleAdd = () => {
+    if (!pendingLanguage) return;
+    onAdd(pendingLanguage, pendingVoice);
+    setPendingLanguage('');
+    setPendingVoice(defaultVoice);
+  };
+
+  return (
+    <div className="space-y-2">
+      {Object.entries(overrides).map(([code, voice]) => {
+        const language = languages.find((lang) => lang.code === code);
+        const voiceInfo = CHIRP3_HD_VOICES.find((v) => v.name === voice);
+        return (
+          <div
+            key={code}
+            className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg
+              bg-gray-100 dark:bg-gray-700/50"
+          >
+            <span className="text-sm text-gray-700 dark:text-gray-200">
+              {language?.name ?? code}
+              <span className="text-gray-400 dark:text-gray-500"> — </span>
+              {voice}
+              {voiceInfo && (
+                <span className="text-gray-400 dark:text-gray-500"> ({voiceInfo.gender})</span>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={() => onRemove(code)}
+              aria-label={`Remove ${language?.name ?? code} voice`}
+              className="text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+            >
+              <FiX className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </div>
+        );
+      })}
+
+      {availableLanguages.length > 0 && (
+        <div className="flex items-center gap-2 pt-1">
+          <select
+            value={pendingLanguage}
+            onChange={(e) => handleLanguageChange(e.target.value)}
+            aria-label="Language to add a voice for"
+            className="flex-1 px-3 py-2 text-sm rounded-lg
+              bg-gray-100 dark:bg-gray-700
+              border border-gray-200 dark:border-gray-600
+              focus:ring-2 focus:ring-amber-500 focus:outline-none
+              text-gray-900 dark:text-gray-100"
+          >
+            <option value="">Add a language...</option>
+            {availableLanguages.map((lang) => (
+              <option key={lang.code} value={lang.code}>
+                {lang.name}
+              </option>
+            ))}
+          </select>
+
+          {pendingLanguage && (
+            <VoiceSelect
+              value={pendingVoice}
+              onChange={setPendingVoice}
+              aria-label="Voice for the selected language"
+            />
+          )}
+
+          <button
+            type="button"
+            onClick={handleAdd}
+            disabled={!pendingLanguage}
+            aria-label="Add language voice"
+            className="p-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700
+              disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <FiPlus className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface SavedIndicatorProps {
   visible: boolean;
 }
@@ -586,9 +776,17 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
   const [apiKeyDirty, setApiKeyDirty] = useState(false);
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [ttsUrlInput, setTtsUrlInput] = useState('');
-  const [ttsUrlDirty, setTtsUrlDirty] = useState(false);
-  const [ttsUrlSaving, setTtsUrlSaving] = useState(false);
+  const [ttsApiKeyInput, setTtsApiKeyInput] = useState('');
+  const [ttsApiKeyDirty, setTtsApiKeyDirty] = useState(false);
+  const [ttsApiKeySaving, setTtsApiKeySaving] = useState(false);
+  const [showTtsApiKey, setShowTtsApiKey] = useState(false);
+  const [defaultVoice, setDefaultVoice] = useState(DEFAULT_CHIRP3_VOICE);
+  const [voiceOverrides, setVoiceOverrides] = useState<Record<string, string>>({});
+
+  const chirp3Languages = useMemo(
+    () => getTargetLanguages().filter((lang) => !NON_CHIRP3_LANGUAGE_CODES.has(lang.code)),
+    []
+  );
 
   // Load auto-start status on mount
   useEffect(() => {
@@ -620,19 +818,38 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
     loadApiKey();
   }, []);
 
-  // Load the saved openai-edge-tts server URL on mount
+  // Load the saved Text-to-Speech API key override on mount
   useEffect(() => {
-    async function loadTtsUrl() {
+    async function loadTtsApiKey() {
       try {
-        const url = await invoke<string | null>('get_setting', {
-          key: EDGE_TTS_BASE_URL_SETTING,
+        const key = await invoke<string | null>('get_setting', {
+          key: GOOGLE_TTS_API_KEY_SETTING,
         });
-        setTtsUrlInput(url ?? DEFAULT_EDGE_TTS_URL);
+        setTtsApiKeyInput(key ?? '');
       } catch (error) {
-        console.error('Failed to load TTS server URL:', error);
+        console.error('Failed to load TTS API key:', error);
       }
     }
-    loadTtsUrl();
+    loadTtsApiKey();
+  }, []);
+
+  // Load the saved TTS voice preferences on mount
+  useEffect(() => {
+    async function loadVoicePreferences() {
+      try {
+        const [voice, overrides] = await Promise.all([
+          invoke<string | null>('get_setting', { key: GOOGLE_TTS_DEFAULT_VOICE_SETTING }),
+          invoke<Record<string, string> | null>('get_setting', {
+            key: GOOGLE_TTS_VOICE_OVERRIDES_SETTING,
+          }),
+        ]);
+        setDefaultVoice(voice ?? DEFAULT_CHIRP3_VOICE);
+        setVoiceOverrides(overrides ?? {});
+      } catch (error) {
+        console.error('Failed to load TTS voice preferences:', error);
+      }
+    }
+    loadVoicePreferences();
   }, []);
 
   /**
@@ -757,21 +974,62 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
     }
   }, [apiKeyInput, flashSavedIndicator]);
 
-  const handleSaveTtsUrl = useCallback(async () => {
-    setTtsUrlSaving(true);
+  const handleSaveTtsApiKey = useCallback(async () => {
+    setTtsApiKeySaving(true);
     try {
       await invoke('set_setting', {
-        key: EDGE_TTS_BASE_URL_SETTING,
-        value: ttsUrlInput.trim() || DEFAULT_EDGE_TTS_URL,
+        key: GOOGLE_TTS_API_KEY_SETTING,
+        value: ttsApiKeyInput.trim(),
       });
-      setTtsUrlDirty(false);
+      setTtsApiKeyDirty(false);
       flashSavedIndicator();
     } catch (error) {
-      console.error('Failed to save TTS server URL:', error);
+      console.error('Failed to save TTS API key:', error);
     } finally {
-      setTtsUrlSaving(false);
+      setTtsApiKeySaving(false);
     }
-  }, [ttsUrlInput, flashSavedIndicator]);
+  }, [ttsApiKeyInput, flashSavedIndicator]);
+
+  const handleDefaultVoiceChange = useCallback(
+    async (voice: string) => {
+      setDefaultVoice(voice);
+      try {
+        await invoke('set_setting', { key: GOOGLE_TTS_DEFAULT_VOICE_SETTING, value: voice });
+        flashSavedIndicator();
+      } catch (error) {
+        console.error('Failed to save default TTS voice:', error);
+      }
+    },
+    [flashSavedIndicator]
+  );
+
+  const saveVoiceOverrides = useCallback(
+    async (overrides: Record<string, string>) => {
+      setVoiceOverrides(overrides);
+      try {
+        await invoke('set_setting', { key: GOOGLE_TTS_VOICE_OVERRIDES_SETTING, value: overrides });
+        flashSavedIndicator();
+      } catch (error) {
+        console.error('Failed to save TTS voice overrides:', error);
+      }
+    },
+    [flashSavedIndicator]
+  );
+
+  const handleAddVoiceOverride = useCallback(
+    (languageCode: string, voice: string) => {
+      saveVoiceOverrides({ ...voiceOverrides, [languageCode]: voice });
+    },
+    [voiceOverrides, saveVoiceOverrides]
+  );
+
+  const handleRemoveVoiceOverride = useCallback(
+    (languageCode: string) => {
+      const { [languageCode]: _removed, ...rest } = voiceOverrides;
+      saveVoiceOverrides(rest);
+    },
+    [voiceOverrides, saveVoiceOverrides]
+  );
 
   // Loading state
   if (isLoading) {
@@ -967,8 +1225,8 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
         </SettingRow>
       </SettingSection>
 
-      {/* Translation API Section */}
-      <SettingSection title="Translation API">
+      {/* Google Cloud API Section */}
+      <SettingSection title="Google Cloud API">
         <SettingRow
           label={
             <span className="inline-flex items-center gap-1.5">
@@ -981,12 +1239,17 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
                 <ol className="list-decimal list-inside space-y-0.5">
                   <li>Create or select a project in Google Cloud Console</li>
                   <li>Enable the "Cloud Translation API"</li>
+                  <li>Enable the "Cloud Text-to-Speech API" too, for the speaker buttons</li>
                   <li>Go to APIs &amp; Services → Credentials and create an API key</li>
                 </ol>
+                <p className="mt-2 pt-2 border-t border-white/10">
+                  Translation free tier: 500,000 characters/month, then $20 per
+                  1M characters.
+                </p>
               </InfoTooltip>
             </span>
           }
-          description="Required for translation."
+          description="Required for translation. Also used for text-to-speech unless a separate key is set below."
         >
           <div className="flex items-center gap-2">
             <div className="relative">
@@ -1036,55 +1299,103 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
         <SettingRow
           label={
             <span className="inline-flex items-center gap-1.5">
-              TTS server URL
+              Text-to-Speech API key
               <InfoTooltip
-                title="Text-to-speech via openai-edge-tts"
-                linkLabel="Open openai-edge-tts on GitHub"
-                linkUrl={OPENAI_EDGE_TTS_REPO_URL}
+                title="Text-to-speech pricing"
+                linkLabel="Open Cloud Text-to-Speech pricing"
+                linkUrl={GOOGLE_TTS_PRICING_URL}
               >
-                <p>
-                  Speaker buttons use a self-hosted server wrapping Microsoft Edge's
-                  neural voices - far better language coverage than voices installed
-                  on this machine. Run it locally:
+                <p>Free tier is per voice type, per month:</p>
+                <ul className="list-disc list-inside space-y-0.5 mt-1">
+                  <li>Standard / WaveNet: 4M characters, then $4/1M</li>
+                  <li>Neural2: 1M characters, then $16/1M</li>
+                  <li>Chirp 3: HD: 1M characters, then $30/1M</li>
+                </ul>
+                <p className="mt-2 pt-2 border-t border-white/10">
+                  This app uses Chirp 3: HD voices.
                 </p>
-                <code className="block mt-1 p-1.5 rounded bg-gray-900 text-amber-200 text-[11px]">
-                  docker run -d -p 5050:5050 travisvn/openai-edge-tts
-                </code>
               </InfoTooltip>
             </span>
           }
-          description="Where the text-to-speech server is running."
+          description="Optional - leave blank to reuse the Translation API key above."
         >
           <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={ttsUrlInput}
-              onChange={(e) => {
-                setTtsUrlInput(e.target.value);
-                setTtsUrlDirty(true);
-              }}
-              placeholder={DEFAULT_EDGE_TTS_URL}
-              autoComplete="off"
-              spellCheck={false}
-              className="w-56 px-3 py-2 text-sm rounded-lg
-                bg-gray-100 dark:bg-gray-700
-                border border-gray-200 dark:border-gray-600
-                focus:ring-2 focus:ring-amber-500 focus:outline-none
-                text-gray-900 dark:text-gray-100 font-mono"
-            />
+            <div className="relative">
+              <input
+                type={showTtsApiKey ? 'text' : 'password'}
+                value={ttsApiKeyInput}
+                onChange={(e) => {
+                  setTtsApiKeyInput(e.target.value);
+                  setTtsApiKeyDirty(true);
+                }}
+                placeholder="Leave blank to share the key above"
+                autoComplete="off"
+                spellCheck={false}
+                className="w-56 pl-3 pr-9 py-2 text-sm rounded-lg
+                  bg-gray-100 dark:bg-gray-700
+                  border border-gray-200 dark:border-gray-600
+                  focus:ring-2 focus:ring-amber-500 focus:outline-none
+                  text-gray-900 dark:text-gray-100 font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setShowTtsApiKey((prev) => !prev)}
+                aria-label={showTtsApiKey ? 'Hide API key' : 'Show API key'}
+                className="absolute right-2 top-1/2 -translate-y-1/2
+                  text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                {showTtsApiKey ? (
+                  <FiEyeOff className="w-4 h-4" aria-hidden="true" />
+                ) : (
+                  <FiEye className="w-4 h-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
             <button
               type="button"
-              onClick={handleSaveTtsUrl}
-              disabled={!ttsUrlDirty || ttsUrlSaving}
+              onClick={handleSaveTtsApiKey}
+              disabled={!ttsApiKeyDirty || ttsApiKeySaving}
               className="px-3 py-2 text-sm font-medium rounded-lg
                 bg-amber-600 text-white hover:bg-amber-700
                 disabled:opacity-50 disabled:cursor-not-allowed
                 transition-colors"
             >
-              {ttsUrlSaving ? 'Saving...' : 'Save'}
+              {ttsApiKeySaving ? 'Saving...' : 'Save'}
             </button>
           </div>
         </SettingRow>
+      </SettingSection>
+
+      {/* Text-to-Speech Voice Section */}
+      <SettingSection title="Text-to-Speech Voice">
+        <SettingRow
+          label="Default voice"
+          description="Used for any language without its own voice below."
+        >
+          <VoiceSelect
+            value={defaultVoice}
+            onChange={handleDefaultVoiceChange}
+            aria-label="Default text-to-speech voice"
+          />
+        </SettingRow>
+        <div className="pt-2">
+          <div className="flex-1 min-w-0 mb-3">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Per-language voices
+            </span>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Pick a different voice for specific languages - e.g. a male voice for
+              English, a female voice for Vietnamese.
+            </p>
+          </div>
+          <PerLanguageVoiceEditor
+            languages={chirp3Languages}
+            overrides={voiceOverrides}
+            defaultVoice={defaultVoice}
+            onAdd={handleAddVoiceOverride}
+            onRemove={handleRemoveVoiceOverride}
+          />
+        </div>
       </SettingSection>
 
       {/* Saved Indicator */}
