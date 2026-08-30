@@ -3,6 +3,8 @@ import { useMutation } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 import {
   translateText,
+  getDictionaryMetadata,
+  DICTIONARY_LOOKUP_MAX_WORDS,
   TranslationResult,
   TranslationError,
   TranslationMetadata,
@@ -77,6 +79,10 @@ export function useTranslation(
   // Store the latest text to translate
   const [pendingText, setPendingText] = useState<string>('');
 
+  // Supplementary dictionary metadata (definitions/examples/synonyms), fetched separately
+  // from the translation itself so a slow lookup never delays the translated text.
+  const [metadata, setMetadata] = useState<TranslationMetadata | undefined>(undefined);
+
   // Track the text that was last successfully translated (to match with mutation result)
   const lastTranslatedTextRef = useRef<string>('');
 
@@ -85,6 +91,9 @@ export function useTranslation(
 
   // Track if component is mounted
   const isMountedRef = useRef(true);
+
+  // Guards against a stale metadata fetch overwriting state after a newer translation started
+  const metadataRequestIdRef = useRef(0);
 
   // Translation mutation using React Query
   const mutation = useMutation<
@@ -102,8 +111,26 @@ export function useTranslation(
       // Save to history using the sourceText from the mutation call (captured at mutation time)
       // This prevents the race condition where pendingText changes before translation completes
       lastTranslatedTextRef.current = sourceText;
+      setMetadata(undefined);
 
       if (!sourceText.trim()) return;
+
+      // Fetch supplementary dictionary metadata (definitions/examples/synonyms) for short
+      // text, without delaying the translated text that's already visible by this point.
+      const trimmedText = sourceText.trim();
+      const wordCount = trimmedText.split(/\s+/).length;
+      const requestId = ++metadataRequestIdRef.current;
+
+      let fetchedMetadata: TranslationMetadata | undefined;
+      if (wordCount <= DICTIONARY_LOOKUP_MAX_WORDS) {
+        const lookupLanguage =
+          sourceLanguage !== 'auto' ? sourceLanguage : data.detectedLanguage ?? 'en';
+        fetchedMetadata = await getDictionaryMetadata(trimmedText, lookupLanguage);
+
+        if (isMountedRef.current && requestId === metadataRequestIdRef.current) {
+          setMetadata(fetchedMetadata);
+        }
+      }
 
       try {
         await invoke('add_history', {
@@ -113,7 +140,7 @@ export function useTranslation(
             sourceLanguage: sourceLanguage,
             targetLanguage: targetLanguage,
             detectedLanguage: data.detectedLanguage,
-            metadata: data.metadata ? JSON.stringify(data.metadata) : undefined,
+            metadata: fetchedMetadata ? JSON.stringify(fetchedMetadata) : undefined,
           }
         });
       } catch (error) {
@@ -173,6 +200,8 @@ export function useTranslation(
   // Reset function to clear all state
   const reset = useCallback(() => {
     setPendingText('');
+    setMetadata(undefined);
+    metadataRequestIdRef.current++;
     resetMutation();
     if (debounceTimeoutRef.current !== null) {
       clearTimeout(debounceTimeoutRef.current);
@@ -184,7 +213,7 @@ export function useTranslation(
     translate,
     translatedText: mutation.data?.translatedText ?? '',
     detectedLanguage: mutation.data?.detectedLanguage,
-    metadata: mutation.data?.metadata,
+    metadata,
     isLoading: mutation.isPending,
     error: mutation.error ?? null,
     reset,

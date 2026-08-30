@@ -7,6 +7,7 @@ import {
   ReactNode,
 } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { invokeWithStartupRetry } from '../utils/invokeRetry';
 
 // ============================================================================
 // Types
@@ -262,9 +263,10 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
   useEffect(() => {
     async function loadSettings() {
       try {
-        const backendSettings = await invoke<Record<string, unknown>>(
-          'get_all_settings'
-        );
+        // Retries briefly - a config-declared window can invoke commands before
+        // the Rust setup() hook finishes registering DbState (see invokeRetry.ts).
+        const backendSettings =
+          await invokeWithStartupRetry<Record<string, unknown>>('get_all_settings');
         const parsed = parseBackendSettings(backendSettings);
         const mergedSettings = { ...DEFAULT_SETTINGS, ...parsed };
 

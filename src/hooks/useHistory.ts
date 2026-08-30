@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { invokeWithStartupRetry } from '../utils/invokeRetry';
 
 /**
  * Represents a single translation history entry
@@ -130,7 +131,9 @@ export function useHistory(options: UseHistoryOptions = {}): UseHistoryReturn {
 
       try {
         const offset = pageNum * pageSize;
-        const response = await invoke<GetHistoryResponse>('get_history', {
+        // Retries briefly - the main window can invoke commands before the Rust
+        // setup() hook finishes registering DbState (see invokeRetry.ts).
+        const response = await invokeWithStartupRetry<GetHistoryResponse>('get_history', {
           limit: pageSize,
           offset,
         });

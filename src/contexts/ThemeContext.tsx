@@ -1,5 +1,5 @@
 import { createContext, useCallback, useEffect, useState, ReactNode } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invokeWithStartupRetry } from '../utils/invokeRetry';
 
 export type Theme = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
@@ -96,9 +96,11 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   useEffect(() => {
     async function loadDensitySettings() {
       try {
+        // Retries briefly - this window can invoke commands before the Rust
+        // setup() hook finishes registering DbState (see invokeRetry.ts).
         const [densitySetting, customDensitySetting] = await Promise.all([
-          invoke<string | null>('get_setting', { key: 'density' }),
-          invoke<number | null>('get_setting', { key: 'custom_density' }),
+          invokeWithStartupRetry<string | null>('get_setting', { key: 'density' }),
+          invokeWithStartupRetry<number | null>('get_setting', { key: 'custom_density' }),
         ]);
 
         const density: DensityPreset = (

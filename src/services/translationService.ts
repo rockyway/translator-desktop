@@ -129,14 +129,19 @@ interface TauriTranslateResponse {
 }
 
 /** Maximum number of words in the source text to still attempt a dictionary lookup */
-const DICTIONARY_LOOKUP_MAX_WORDS = 3;
+export const DICTIONARY_LOOKUP_MAX_WORDS = 3;
 
 /**
  * Looks up dictionary metadata (definitions, examples, synonyms, pronunciation) for a
  * short word/phrase via the Tauri backend (freedictionaryapi.com). Never throws - a
  * lookup failure just means no metadata, since it's a supplementary feature.
+ *
+ * Callers should fetch this separately from {@link translateText} rather than await
+ * it inline - freedictionaryapi.com can be slow (especially the first request of a
+ * session, before its connection is warm) and must not block the translated text
+ * from being displayed.
  */
-async function getDictionaryMetadata(
+export async function getDictionaryMetadata(
   word: string,
   language: string
 ): Promise<TranslationMetadata | undefined> {
@@ -186,23 +191,12 @@ export async function translateText(
       to: options.to,
     });
 
-    const trimmedText = text.trim();
-    const wordCount = trimmedText.split(/\s+/).length;
-    const sourceLanguage =
-      options.from && options.from !== 'auto'
-        ? options.from
-        : result.detectedLanguage ?? 'en';
-
-    const metadata =
-      wordCount <= DICTIONARY_LOOKUP_MAX_WORDS
-        ? await getDictionaryMetadata(trimmedText, sourceLanguage)
-        : undefined;
-
+    // Dictionary metadata (definitions/examples/synonyms) is fetched separately by the
+    // caller via getDictionaryMetadata() - it must not block the translated text result.
     return {
       translatedText: result.translatedText,
       detectedLanguage: result.detectedLanguage,
       pronunciation: undefined,
-      metadata,
     };
   } catch (error) {
     // Handle Tauri command errors

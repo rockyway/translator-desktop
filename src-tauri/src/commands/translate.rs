@@ -6,6 +6,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
 
 use super::DbState;
@@ -20,6 +21,9 @@ impl Default for HttpClientState {
         Self(Arc::new(
             Client::builder()
                 .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                // Bounds how long a slow/hung request (e.g. a cold connection to an
+                // external API on the very first call of a session) can block a caller.
+                .timeout(Duration::from_secs(15))
                 .build()
                 .expect("Failed to create HTTP client"),
         ))

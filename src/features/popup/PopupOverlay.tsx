@@ -4,6 +4,7 @@ import { MdStop } from 'react-icons/md';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../hooks/useTranslation';
+import { invokeWithStartupRetry } from '../../utils/invokeRetry';
 import {
   playTextToSpeech,
   getLanguageByCode,
@@ -148,9 +149,12 @@ export function PopupOverlay({
 
     async function loadTargetLanguage() {
       try {
-        const result = await invoke<{ key: string; value: string } | null>('get_setting', {
-          key: 'target_language',
-        });
+        // Retries briefly - the popup window can invoke commands before the Rust
+        // setup() hook finishes registering DbState (see invokeRetry.ts).
+        const result = await invokeWithStartupRetry<{ key: string; value: string } | null>(
+          'get_setting',
+          { key: 'target_language' }
+        );
         // get_setting returns a JSON value — could be a string like "vi"
         if (result !== null && result !== undefined) {
           const lang = typeof result === 'string' ? result : String(result);
@@ -181,10 +185,6 @@ export function PopupOverlay({
     targetLanguage,
     debounceMs: 100, // Faster for popup
   });
-
-  // Note: Popup does NOT save language changes back to settings
-  // Main UI is the single source of truth for language preferences
-  // Changes in popup are temporary for that session only
 
   // Auto-translate when text changes — wait for settings to load first
   useEffect(() => {
@@ -391,9 +391,13 @@ export function PopupOverlay({
     onClose();
   }, [stopAllAudio, onOpenMain, onClose, text, translatedText, detectedLanguage, targetLanguage, metadata]);
 
-  // Handle language change
+  // Handle language change - persist to settings so it survives app restarts
+  // and is picked up as the default by the Main UI and future popups
   const handleTargetLanguageChange = useCallback((code: string) => {
     setTargetLanguage(code);
+    invoke('set_setting', { key: 'target_language', value: code }).catch((error) => {
+      console.error('Failed to persist target language setting:', error);
+    });
   }, []);
 
   // Get display names for languages
