@@ -9,6 +9,7 @@ import {
   getLanguageByCode,
   getTargetLanguages,
   LanguageOption,
+  SpeechHandle,
   TranslationMetadata,
 } from '../../services/translationService';
 import { useTheme } from '../../hooks/useTheme';
@@ -128,8 +129,8 @@ export function PopupOverlay({
   const targetTextRef = useRef<HTMLParagraphElement>(null);
 
   // Refs for audio elements
-  const sourceAudioRef = useRef<HTMLAudioElement | null>(null);
-  const targetAudioRef = useRef<HTMLAudioElement | null>(null);
+  const sourceAudioRef = useRef<SpeechHandle | null>(null);
+  const targetAudioRef = useRef<SpeechHandle | null>(null);
 
   // Target language - load from Tauri settings (set by Main UI)
   const [targetLanguage, setTargetLanguage] = useState(

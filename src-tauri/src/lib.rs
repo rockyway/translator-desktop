@@ -10,15 +10,14 @@ mod macos_monitor;
 
 use commands::{
     add_history, apply_acrylic_effect, apply_mica_effect, clear_history, close_window,
-    delete_history, get_all_settings, get_confirmation_data, get_history, get_popup_text,
-    get_setting, handle_global_hotkey, hide_popup, init_config_store, init_database,
-    is_autostart_enabled, is_popup_visible, is_window_maximized, minimize_window, resize_popup,
-    respond_to_confirmation, search_history, set_autostart_enabled, set_popup_text, set_setting,
-    show_main_window, show_popup, simulate_copy, speak, start_drag_window, toggle_maximize_window,
-    translate,
-    trigger_hotkey_translate, update_global_hotkey, update_selection_modifier,
-    ConfirmationDataState, ConfirmationState, DbState, HotkeyState, HttpClientState,
-    PopupTextState,
+    delete_history, get_all_settings, get_confirmation_data, get_dictionary_metadata, get_history,
+    get_popup_text, get_setting, handle_global_hotkey, hide_popup, init_config_store,
+    init_database, is_autostart_enabled, is_popup_visible, is_window_maximized, minimize_window,
+    resize_popup, respond_to_confirmation, search_history, set_autostart_enabled, set_popup_text,
+    set_setting, show_main_window, show_popup, simulate_copy, speak_edge_tts, start_drag_window,
+    toggle_maximize_window, translate, trigger_hotkey_translate, update_global_hotkey,
+    update_selection_modifier, ConfirmationDataState, ConfirmationState, DbState, HotkeyState,
+    HttpClientState, PopupTextState,
 };
 use ipc::is_ipc_connected;
 #[cfg(target_os = "windows")]
@@ -660,7 +659,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             translate,
-            speak,
+            get_dictionary_metadata,
+            speak_edge_tts,
             add_history,
             get_history,
             delete_history,

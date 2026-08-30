@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { FiCheck, FiMoon, FiSun, FiMonitor, FiType, FiAlertCircle } from 'react-icons/fi';
+import { FiCheck, FiMoon, FiSun, FiMonitor, FiType, FiAlertCircle, FiEye, FiEyeOff, FiInfo } from 'react-icons/fi';
 import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-shell';
 import { useSettings } from '../../hooks/useSettings';
 import type { Theme, SelectionModifier, HotkeyModifier, DensityPreset } from '../../contexts/SettingsContext';
 import { DENSITY_VALUES } from '../../contexts/SettingsContext';
@@ -137,6 +138,15 @@ const DENSITY_OPTIONS: DensityOption[] = [
 
 const SAVED_INDICATOR_DURATION = 1500;
 
+/** config_store key holding the Google Cloud Translation API key */
+const GOOGLE_TRANSLATE_API_KEY_SETTING = 'google_translate_api_key';
+
+/** config_store key holding the openai-edge-tts server base URL */
+const EDGE_TTS_BASE_URL_SETTING = 'edge_tts_base_url';
+
+/** Default openai-edge-tts server URL (matches the Rust command's default) */
+const DEFAULT_EDGE_TTS_URL = 'http://localhost:5050';
+
 // ============================================================================
 // Sub-Components
 // ============================================================================
@@ -161,7 +171,7 @@ function SettingSection({ title, children }: SettingSectionProps) {
 }
 
 interface SettingRowProps {
-  label: string;
+  label: React.ReactNode;
   description?: string;
   children: React.ReactNode;
 }
@@ -184,6 +194,66 @@ function SettingRow({ label, description, children }: SettingRowProps) {
       </div>
       <div className="flex-shrink-0">{children}</div>
     </div>
+  );
+}
+
+/** Google Cloud Console page for creating/restricting API keys */
+const GOOGLE_CLOUD_CREDENTIALS_URL = 'https://console.cloud.google.com/apis/credentials';
+
+/** openai-edge-tts GitHub repo */
+const OPENAI_EDGE_TTS_REPO_URL = 'https://github.com/travisvn/openai-edge-tts';
+
+interface InfoTooltipProps {
+  title: string;
+  children: React.ReactNode;
+  linkLabel: string;
+  linkUrl: string;
+}
+
+/**
+ * Info icon with a hover tooltip (steps + a clickable link that opens in the
+ * system browser). Reused for the API key guide and the TTS server guide.
+ */
+function InfoTooltip({ title, children, linkLabel, linkUrl }: InfoTooltipProps) {
+  const handleOpenLink = useCallback(() => {
+    open(linkUrl).catch((error) => {
+      console.error(`Failed to open link (${linkUrl}):`, error);
+    });
+  }, [linkUrl]);
+
+  return (
+    <span className="relative inline-flex group">
+      <FiInfo
+        className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-help"
+        aria-hidden="true"
+      />
+      {/*
+        The visible card sits inside a slightly larger wrapper whose extra space is
+        padding (part of the hoverable box), not margin (a real gap). A margin gap
+        breaks hover: the cursor leaves the icon before it ever reaches the card,
+        so group-hover turns off and the tooltip vanishes before you can click it.
+      */}
+      <div
+        className="absolute left-1/2 -translate-x-1/2 bottom-full pb-2 w-72 z-10
+          opacity-0 invisible group-hover:opacity-100 group-hover:visible
+          transition-opacity duration-150"
+      >
+        <div
+          role="tooltip"
+          className="p-3 rounded-lg bg-gray-800 text-white text-xs leading-relaxed shadow-lg"
+        >
+          <p className="font-semibold mb-1">{title}</p>
+          {children}
+          <button
+            type="button"
+            onClick={handleOpenLink}
+            className="mt-2 text-amber-300 hover:text-amber-200 underline"
+          >
+            {linkLabel}
+          </button>
+        </div>
+      </div>
+    </span>
   );
 }
 
@@ -512,6 +582,13 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
   const [showSaved, setShowSaved] = useState(false);
   const [autoStartEnabled, setAutoStartEnabled] = useState(false);
   const [autoStartLoading, setAutoStartLoading] = useState(true);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [apiKeyDirty, setApiKeyDirty] = useState(false);
+  const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [ttsUrlInput, setTtsUrlInput] = useState('');
+  const [ttsUrlDirty, setTtsUrlDirty] = useState(false);
+  const [ttsUrlSaving, setTtsUrlSaving] = useState(false);
 
   // Load auto-start status on mount
   useEffect(() => {
@@ -526,6 +603,36 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
       }
     }
     loadAutoStartStatus();
+  }, []);
+
+  // Load the saved Google Cloud Translation API key on mount
+  useEffect(() => {
+    async function loadApiKey() {
+      try {
+        const key = await invoke<string | null>('get_setting', {
+          key: GOOGLE_TRANSLATE_API_KEY_SETTING,
+        });
+        setApiKeyInput(key ?? '');
+      } catch (error) {
+        console.error('Failed to load translation API key:', error);
+      }
+    }
+    loadApiKey();
+  }, []);
+
+  // Load the saved openai-edge-tts server URL on mount
+  useEffect(() => {
+    async function loadTtsUrl() {
+      try {
+        const url = await invoke<string | null>('get_setting', {
+          key: EDGE_TTS_BASE_URL_SETTING,
+        });
+        setTtsUrlInput(url ?? DEFAULT_EDGE_TTS_URL);
+      } catch (error) {
+        console.error('Failed to load TTS server URL:', error);
+      }
+    }
+    loadTtsUrl();
   }, []);
 
   /**
@@ -633,6 +740,38 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
     },
     [flashSavedIndicator]
   );
+
+  const handleSaveApiKey = useCallback(async () => {
+    setApiKeySaving(true);
+    try {
+      await invoke('set_setting', {
+        key: GOOGLE_TRANSLATE_API_KEY_SETTING,
+        value: apiKeyInput.trim(),
+      });
+      setApiKeyDirty(false);
+      flashSavedIndicator();
+    } catch (error) {
+      console.error('Failed to save translation API key:', error);
+    } finally {
+      setApiKeySaving(false);
+    }
+  }, [apiKeyInput, flashSavedIndicator]);
+
+  const handleSaveTtsUrl = useCallback(async () => {
+    setTtsUrlSaving(true);
+    try {
+      await invoke('set_setting', {
+        key: EDGE_TTS_BASE_URL_SETTING,
+        value: ttsUrlInput.trim() || DEFAULT_EDGE_TTS_URL,
+      });
+      setTtsUrlDirty(false);
+      flashSavedIndicator();
+    } catch (error) {
+      console.error('Failed to save TTS server URL:', error);
+    } finally {
+      setTtsUrlSaving(false);
+    }
+  }, [ttsUrlInput, flashSavedIndicator]);
 
   // Loading state
   if (isLoading) {
@@ -825,6 +964,126 @@ export function SettingsPanel({ className = '' }: SettingsPanelProps) {
               border border-gray-200 dark:border-gray-600
               focus:ring-2 focus:ring-amber-500 focus:outline-none"
           />
+        </SettingRow>
+      </SettingSection>
+
+      {/* Translation API Section */}
+      <SettingSection title="Translation API">
+        <SettingRow
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              Google Cloud Translation API key
+              <InfoTooltip
+                title="How to get an API key"
+                linkLabel="Open Google Cloud Console"
+                linkUrl={GOOGLE_CLOUD_CREDENTIALS_URL}
+              >
+                <ol className="list-decimal list-inside space-y-0.5">
+                  <li>Create or select a project in Google Cloud Console</li>
+                  <li>Enable the "Cloud Translation API"</li>
+                  <li>Go to APIs &amp; Services → Credentials and create an API key</li>
+                </ol>
+              </InfoTooltip>
+            </span>
+          }
+          description="Required for translation."
+        >
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <input
+                type={showApiKey ? 'text' : 'password'}
+                value={apiKeyInput}
+                onChange={(e) => {
+                  setApiKeyInput(e.target.value);
+                  setApiKeyDirty(true);
+                }}
+                placeholder="Paste API key"
+                autoComplete="off"
+                spellCheck={false}
+                className="w-56 pl-3 pr-9 py-2 text-sm rounded-lg
+                  bg-gray-100 dark:bg-gray-700
+                  border border-gray-200 dark:border-gray-600
+                  focus:ring-2 focus:ring-amber-500 focus:outline-none
+                  text-gray-900 dark:text-gray-100 font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => setShowApiKey((prev) => !prev)}
+                aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+                className="absolute right-2 top-1/2 -translate-y-1/2
+                  text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                {showApiKey ? (
+                  <FiEyeOff className="w-4 h-4" aria-hidden="true" />
+                ) : (
+                  <FiEye className="w-4 h-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveApiKey}
+              disabled={!apiKeyDirty || apiKeySaving}
+              className="px-3 py-2 text-sm font-medium rounded-lg
+                bg-amber-600 text-white hover:bg-amber-700
+                disabled:opacity-50 disabled:cursor-not-allowed
+                transition-colors"
+            >
+              {apiKeySaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </SettingRow>
+        <SettingRow
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              TTS server URL
+              <InfoTooltip
+                title="Text-to-speech via openai-edge-tts"
+                linkLabel="Open openai-edge-tts on GitHub"
+                linkUrl={OPENAI_EDGE_TTS_REPO_URL}
+              >
+                <p>
+                  Speaker buttons use a self-hosted server wrapping Microsoft Edge's
+                  neural voices - far better language coverage than voices installed
+                  on this machine. Run it locally:
+                </p>
+                <code className="block mt-1 p-1.5 rounded bg-gray-900 text-amber-200 text-[11px]">
+                  docker run -d -p 5050:5050 travisvn/openai-edge-tts
+                </code>
+              </InfoTooltip>
+            </span>
+          }
+          description="Where the text-to-speech server is running."
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={ttsUrlInput}
+              onChange={(e) => {
+                setTtsUrlInput(e.target.value);
+                setTtsUrlDirty(true);
+              }}
+              placeholder={DEFAULT_EDGE_TTS_URL}
+              autoComplete="off"
+              spellCheck={false}
+              className="w-56 px-3 py-2 text-sm rounded-lg
+                bg-gray-100 dark:bg-gray-700
+                border border-gray-200 dark:border-gray-600
+                focus:ring-2 focus:ring-amber-500 focus:outline-none
+                text-gray-900 dark:text-gray-100 font-mono"
+            />
+            <button
+              type="button"
+              onClick={handleSaveTtsUrl}
+              disabled={!ttsUrlDirty || ttsUrlSaving}
+              className="px-3 py-2 text-sm font-medium rounded-lg
+                bg-amber-600 text-white hover:bg-amber-700
+                disabled:opacity-50 disabled:cursor-not-allowed
+                transition-colors"
+            >
+              {ttsUrlSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
         </SettingRow>
       </SettingSection>
 

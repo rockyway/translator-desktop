@@ -1,4 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
+import { activeSpeechProvider, SpeechHandle } from './speechProvider';
+
+export type { SpeechHandle };
 
 /**
  * Alternative translation for a word
@@ -123,12 +126,34 @@ export class TTSError extends Error {
 interface TauriTranslateResponse {
   translatedText: string;
   detectedLanguage?: string;
-  metadata?: TranslationMetadata;
 }
 
+/** Maximum number of words in the source text to still attempt a dictionary lookup */
+const DICTIONARY_LOOKUP_MAX_WORDS = 3;
 
 /**
- * Translates text using Tauri backend (Google Translate API)
+ * Looks up dictionary metadata (definitions, examples, synonyms, pronunciation) for a
+ * short word/phrase via the Tauri backend (freedictionaryapi.com). Never throws - a
+ * lookup failure just means no metadata, since it's a supplementary feature.
+ */
+async function getDictionaryMetadata(
+  word: string,
+  language: string
+): Promise<TranslationMetadata | undefined> {
+  try {
+    const result = await invoke<TranslationMetadata | null>(
+      'get_dictionary_metadata',
+      { word, language }
+    );
+    return result ?? undefined;
+  } catch (error) {
+    console.error('Failed to fetch dictionary metadata:', error);
+    return undefined;
+  }
+}
+
+/**
+ * Translates text using Tauri backend (Google Cloud Translation API)
  *
  * @param text - The text to translate
  * @param options - Translation options (source and target languages)
@@ -161,11 +186,23 @@ export async function translateText(
       to: options.to,
     });
 
+    const trimmedText = text.trim();
+    const wordCount = trimmedText.split(/\s+/).length;
+    const sourceLanguage =
+      options.from && options.from !== 'auto'
+        ? options.from
+        : result.detectedLanguage ?? 'en';
+
+    const metadata =
+      wordCount <= DICTIONARY_LOOKUP_MAX_WORDS
+        ? await getDictionaryMetadata(trimmedText, sourceLanguage)
+        : undefined;
+
     return {
       translatedText: result.translatedText,
       detectedLanguage: result.detectedLanguage,
       pronunciation: undefined,
-      metadata: result.metadata,
+      metadata,
     };
   } catch (error) {
     // Handle Tauri command errors
@@ -189,73 +226,28 @@ export async function translateText(
 }
 
 /**
- * Plays text using Tauri backend (Google Text-to-Speech API)
+ * Plays text as speech via the active {@link SpeechProvider} (see `speechProvider.ts`).
  *
- * @param text - The text to convert to speech (truncated to 200 characters if longer)
+ * @param text - The text to convert to speech
  * @param languageCode - The language code for the voice (e.g., 'en', 'es', 'ja')
- * @returns Promise that resolves to the Audio element when audio starts playing
+ * @returns Promise that resolves to a handle for controlling playback
  * @throws TTSError if TTS fails
  *
  * @example
  * ```ts
- * const audio = await playTextToSpeech('Hello world', 'en');
- * // Later you can stop it: audio.pause(); audio.currentTime = 0;
+ * const handle = await playTextToSpeech('Hello world', 'en');
+ * // Later you can stop it: handle.pause(); handle.currentTime = 0;
  * ```
  */
 export async function playTextToSpeech(
   text: string,
   languageCode: string
-): Promise<HTMLAudioElement> {
-  // Truncate to 200 chars for Google TTS API limit (handle internally)
-  const textToSpeak = text.length > 200 ? text.slice(0, 200) : text;
-
+): Promise<SpeechHandle> {
   try {
-    const base64MP3 = await invoke<string>('speak', {
-      text: textToSpeak,
-      languageCode,
-    });
-
-    // Convert Base64 to Blob
-    const binaryString = atob(base64MP3);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const blob = new Blob([bytes], { type: 'audio/mpeg' });
-
-    // Create audio element and play
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-
-    // Clean up object URL when audio finishes playing
-    audio.addEventListener('ended', () => {
-      URL.revokeObjectURL(url);
-    });
-
-    // Clean up on error
-    audio.addEventListener('error', () => {
-      URL.revokeObjectURL(url);
-    });
-
-    await audio.play();
-    return audio;
+    return await activeSpeechProvider.speak(text, languageCode);
   } catch (error) {
-    // Re-throw TTSError as-is
-    if (error instanceof TTSError) {
-      throw error;
-    }
-
-    // Handle Tauri command errors
     if (error instanceof Error) {
-      throw new TTSError(
-        `Text-to-speech failed: ${error.message}`,
-        error
-      );
-    }
-
-    // Handle string errors from Tauri
-    if (typeof error === 'string') {
-      throw new TTSError(`Text-to-speech failed: ${error}`, error);
+      throw new TTSError(`Text-to-speech failed: ${error.message}`, error);
     }
 
     throw new TTSError(

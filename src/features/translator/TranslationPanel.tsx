@@ -11,6 +11,7 @@ import {
   getTargetLanguages,
   getLanguageByCode,
   playTextToSpeech,
+  SpeechHandle,
   TranslationMetadata,
 } from '../../services/translationService';
 
@@ -116,8 +117,8 @@ export function TranslationPanel({
   const [isPlayingOutput, setIsPlayingOutput] = useState(false);
 
   // Refs for audio elements
-  const inputAudioRef = useRef<HTMLAudioElement | null>(null);
-  const outputAudioRef = useRef<HTMLAudioElement | null>(null);
+  const inputAudioRef = useRef<SpeechHandle | null>(null);
+  const outputAudioRef = useRef<SpeechHandle | null>(null);
 
   // Pre-translated text from popup (to avoid re-translating)
   const [preTranslatedText, setPreTranslatedText] = useState<string | undefined>(

@@ -13,7 +13,7 @@ import {
 } from 'react-icons/fi';
 import { MdStop } from 'react-icons/md';
 import { useHistory, HistoryEntry } from '../../hooks/useHistory';
-import { getLanguageByCode, playTextToSpeech, TranslationMetadata } from '../../services/translationService';
+import { getLanguageByCode, playTextToSpeech, SpeechHandle, TranslationMetadata } from '../../services/translationService';
 
 interface HistoryPanelProps {
   className?: string;
@@ -100,8 +100,8 @@ function HistoryCard({
   // Audio playback state
   const [isPlayingSource, setIsPlayingSource] = useState(false);
   const [isPlayingTarget, setIsPlayingTarget] = useState(false);
-  const sourceAudioRef = useRef<HTMLAudioElement | null>(null);
-  const targetAudioRef = useRef<HTMLAudioElement | null>(null);
+  const sourceAudioRef = useRef<SpeechHandle | null>(null);
+  const targetAudioRef = useRef<SpeechHandle | null>(null);
 
   // Cleanup audio on unmount
   useEffect(() => {
