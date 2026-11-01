@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Extensions.Logging;
 using TextMonitor.Service.Enums;
@@ -13,8 +14,16 @@ namespace TextMonitor.Service.TextRetrieval;
 public class ClipboardService : IClipboardService
 {
     private readonly ILogger<ClipboardService> _logger;
-    private const int ClipboardRetryAttempts = 3;
-    private const int ClipboardRetryDelayMs = 50;
+    private const int ClipboardPollIntervalMs = 25;
+    private const int ClipboardTimeoutMs = 300;
+    private const int AltReleaseTimeoutMs = 2000;
+    private const int VkMenu = 0x12;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetClipboardSequenceNumber();
 
     public ClipboardService(ILogger<ClipboardService> logger)
     {
@@ -174,64 +183,56 @@ public class ClipboardService : IClipboardService
         {
             _logger.LogDebug("Attempting clipboard-based text retrieval");
 
-            // Save original clipboard state
+            // Capture changes while saving state and waiting for Alt release.
+            var originalSequence = GetClipboardSequenceNumber();
             originalState = await SaveClipboardStateAsync();
             if (originalState == null)
             {
                 return CreateFailureResult("Failed to save clipboard state", startTime);
             }
 
-            // Give user's Ctrl+C operation time to complete
-            _logger.LogDebug("Waiting for potential user clipboard operation to complete");
-            await Task.Delay(200);
-
-            // Check if clipboard was updated by user
-            var currentClipboardState = await SaveClipboardStateAsync();
-            if (currentClipboardState != null &&
-                currentClipboardState.ContainsText &&
-                !string.IsNullOrEmpty(currentClipboardState.Text))
+            // A physical Alt key would turn the simulated Ctrl+C into Ctrl+Alt+C.
+            // Never synthesize an Alt release: wait for the user instead.
+            var altWait = System.Diagnostics.Stopwatch.StartNew();
+            while ((GetAsyncKeyState(VkMenu) & 0x8000) != 0)
             {
-                // Check if clipboard changed since we started
-                if (!originalState.ContainsText ||
-                    originalState.Text != currentClipboardState.Text)
+                if (altWait.ElapsedMilliseconds >= AltReleaseTimeoutMs)
                 {
-                    _logger.LogInformation(
-                        "Clipboard already updated by user or application, using existing content ({Length} chars)",
-                        currentClipboardState.Text.Length);
+                    _logger.LogWarning("Clipboard copy cancelled: Alt was not released within {Timeout} ms", AltReleaseTimeoutMs);
+                    return CreateFailureResult("Release Alt to copy the selected text", startTime);
+                }
 
-                    var earlyResult = TextRetrievalResult.CreateSuccess(
-                        currentClipboardState.Text,
-                        RetrievalMethod.ClipboardSimulation);
+                await Task.Delay(ClipboardPollIntervalMs);
+            }
+
+            _logger.LogInformation("Clipboard copy: Alt released after {WaitMs} ms", altWait.ElapsedMilliseconds);
+
+            // If the user or target app copied while we waited, use that fresh text
+            // without overwriting their clipboard.
+            if (GetClipboardSequenceNumber() != originalSequence)
+            {
+                var currentState = await SaveClipboardStateAsync();
+                if (currentState?.ContainsText == true && !string.IsNullOrEmpty(currentState.Text))
+                {
+                    _logger.LogInformation("Clipboard changed during retrieval; using fresh text ({Length} chars)", currentState.Text.Length);
+                    var earlyResult = TextRetrievalResult.CreateSuccess(currentState.Text, RetrievalMethod.ClipboardSimulation);
                     earlyResult.RetrievalDuration = DateTime.UtcNow - startTime;
-
-                    // Restore original clipboard if it was different
-                    if (originalState.ContainsText && originalState.Text != currentClipboardState.Text)
-                    {
-                        await RestoreClipboardStateAsync(originalState);
-                    }
-
                     return earlyResult;
                 }
             }
 
-            // Clipboard wasn't updated by user - proceed with simulation
-            _logger.LogDebug("No user clipboard operation detected, proceeding with Ctrl+C simulation");
-
             // Clear clipboard to ensure we're getting fresh data
             await RunOnStaThreadAsync(() => Clipboard.Clear());
-            await Task.Delay(ClipboardRetryDelayMs);
 
             // Simulate Ctrl+C
             _logger.LogDebug("Sending Ctrl+C simulation");
             await RunOnStaThreadAsync(() => SendKeys.SendWait("^c"));
 
-            // Wait for clipboard to be populated
-            await Task.Delay(ClipboardRetryDelayMs * 2);
-
-            // Try to retrieve text from clipboard with retries
+            // Poll immediately, returning as soon as the target app copies the text.
             string? selectedText = null;
-
-            for (int attempt = 0; attempt < ClipboardRetryAttempts; attempt++)
+            var copyWait = System.Diagnostics.Stopwatch.StartNew();
+            var attempt = 0;
+            while (true)
             {
                 try
                 {
@@ -255,21 +256,19 @@ public class ClipboardService : IClipboardService
                         break;
                     }
 
-                    if (attempt < ClipboardRetryAttempts - 1)
-                    {
-                        _logger.LogDebug("Clipboard empty, retry attempt {Attempt}", attempt + 1);
-                        await Task.Delay(ClipboardRetryDelayMs);
-                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Error reading clipboard, attempt {Attempt}", attempt + 1);
-                    if (attempt < ClipboardRetryAttempts - 1)
-                    {
-                        await Task.Delay(ClipboardRetryDelayMs);
-                    }
                 }
+
+                if (copyWait.ElapsedMilliseconds >= ClipboardTimeoutMs)
+                    break;
+
+                attempt++;
+                await Task.Delay(ClipboardPollIntervalMs);
             }
+            _logger.LogInformation("Clipboard copy completed in {WaitMs} ms; text found: {Found}", copyWait.ElapsedMilliseconds, !string.IsNullOrEmpty(selectedText));
 
             // Restore original clipboard
             if (originalState != null)

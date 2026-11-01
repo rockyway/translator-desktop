@@ -60,8 +60,9 @@ $DevOutputDir = Join-Path $ProjectRoot "src-tauri\target\debug"
 if (-not (Test-Path $DevOutputDir)) {
     New-Item -ItemType Directory -Path $DevOutputDir -Force | Out-Null
 }
-Copy-Item -Force $TargetExe $DevOutputDir
-Write-Host "Copied to dev location: $DevOutputDir" -ForegroundColor Cyan
+$DevExe = Join-Path $DevOutputDir "text-helper.exe"
+Copy-Item -Force $TargetExe $DevExe
+Write-Host "Copied to dev location: $DevExe" -ForegroundColor Cyan
 
 Write-Host ""
 Write-Host "Sidecar build complete!" -ForegroundColor Green

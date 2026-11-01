@@ -47,7 +47,10 @@ public class TextRetrievalEngine : ITextRetrievalService
         if (_uiAutomationService.IsAvailable())
         {
             _logger.LogDebug("Attempting primary method: UI Automation");
+            var uiAutomationTimer = System.Diagnostics.Stopwatch.StartNew();
             var uiAutomationResult = await _uiAutomationService.GetSelectedTextAsync();
+            _logger.LogInformation("UI Automation retrieval took {ElapsedMs} ms; success: {Success}",
+                uiAutomationTimer.ElapsedMilliseconds, uiAutomationResult.Success);
 
             if (uiAutomationResult.Success && !string.IsNullOrEmpty(uiAutomationResult.Text))
             {
