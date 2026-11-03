@@ -2,6 +2,7 @@
 
 mod commands;
 mod ipc;
+mod memory_trim;
 mod popup_handler;
 mod sidecar;
 mod window_visibility;
@@ -213,6 +214,7 @@ pub fn run() {
         .manage(ConfirmationDataState::default())
         // Shared HTTP client — created once to avoid TLS/connection pool setup per request
         .manage(HttpClientState::default())
+        .manage(memory_trim::MemoryTrim::default())
         .setup(|app| {
             // Initialize job object to ensure child processes terminate with parent
             init_job_object();
@@ -596,7 +598,30 @@ pub fn run() {
 
             Ok(())
         })
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && payload.event() == tauri::webview::PageLoadEvent::Finished
+            {
+                memory_trim::request(webview.app_handle(), memory_trim::Trigger::Startup);
+            }
+        })
         .on_window_event(|window, event| {
+            if window.label() == "main" {
+                match event {
+                    tauri::WindowEvent::Focused(focused) => {
+                        let app = window.app_handle();
+                        memory_trim::focused(app, *focused);
+                        if !*focused
+                            && window.is_visible().is_ok_and(|visible| visible)
+                            && window.is_minimized().is_ok_and(|minimized| !minimized)
+                        {
+                            memory_trim::request(app, memory_trim::Trigger::Deactivated);
+                        }
+                    }
+                    tauri::WindowEvent::Resized(_) => memory_trim::resized(window),
+                    _ => {}
+                }
+            }
             // macOS: Re-check accessibility permission when window regains focus
             #[cfg(target_os = "macos")]
             if window.label() == "main" {

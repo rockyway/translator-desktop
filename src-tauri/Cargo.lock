@@ -6368,8 +6368,10 @@ dependencies = [
  "tokio",
  "urlencoding",
  "velopack",
+ "webview2-com",
  "window-vibrancy 0.5.3",
  "windows 0.58.0",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
