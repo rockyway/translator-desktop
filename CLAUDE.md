@@ -24,6 +24,7 @@ npm run tauri dev              # Run Tauri app in dev mode
 npm run build                  # Build frontend only
 npm run build:sidecar          # Build .NET sidecar only
 npm run build:all              # Build sidecar + full Tauri build
+npm run build:no-bundle        # Build sidecar + release exe only (no installer); quit the app first
 npm run tauri build            # Full production build (requires sidecar)
 
 # Testing

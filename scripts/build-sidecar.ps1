@@ -55,14 +55,23 @@ if (Test-Path $PdbFile) {
     Remove-Item $PdbFile
 }
 
-# Copy to target/debug for development mode
-$DevOutputDir = Join-Path $ProjectRoot "src-tauri\target\debug"
-if (-not (Test-Path $DevOutputDir)) {
-    New-Item -ItemType Directory -Path $DevOutputDir -Force | Out-Null
+# Copy next to the app exe for both profiles. tauri-build copies externalBin only when
+# its build script reruns, and a sidecar-only rebuild does not trigger that, so
+# target\release would otherwise keep running a stale text-helper.exe.
+foreach ($BuildProfile in @("debug", "release")) {
+    $ProfileDir = Join-Path $ProjectRoot "src-tauri\target\$BuildProfile"
+    if (-not (Test-Path $ProfileDir)) {
+        New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
+    }
+    $ProfileExe = Join-Path $ProfileDir "text-helper.exe"
+    try {
+        Copy-Item -Force $TargetExe $ProfileExe
+        Write-Host "Copied to ${BuildProfile}: $ProfileExe" -ForegroundColor Cyan
+    }
+    catch {
+        throw "Could not replace $ProfileExe (is the app running? Quit it first): $_"
+    }
 }
-$DevExe = Join-Path $DevOutputDir "text-helper.exe"
-Copy-Item -Force $TargetExe $DevExe
-Write-Host "Copied to dev location: $DevExe" -ForegroundColor Cyan
 
 Write-Host ""
 Write-Host "Sidecar build complete!" -ForegroundColor Green
