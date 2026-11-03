@@ -1,7 +1,7 @@
-//! Idle working-set trim for the host and its WebView2 process tree (Windows).
+//! Idle working-set trim for the host, its WebView2 process tree, and the .NET sidecar (Windows).
 //!
-//! One visible trim and at most one subsequent LOW trim per quiet epoch, never
-//! periodic. See docs/plan/005-idle-memory-trim.md. Native work stays on the
+//! One visible trim, at most one subsequent LOW trim, and one settle trim 5 minutes after the LOW trim per quiet epoch, never periodic.
+//! See docs/plan/005-idle-memory-trim.md. Native work stays on the
 //! main (webview) thread; detached tasks own `Arc`s, never `State` borrows.
 use std::{
     sync::{Arc, Mutex},
@@ -20,12 +20,14 @@ pub enum Trigger {
     Minimized,
     Deactivated,
     PopupHidden,
+    Settle,
 }
 impl Trigger {
     fn delay(self) -> Duration {
         Duration::from_secs(match self {
             Self::Startup => 8,
             Self::Deactivated => 15,
+            Self::Settle => 300,
             _ => 3,
         })
     }
@@ -37,6 +39,7 @@ impl Trigger {
             Self::Minimized => "minimized",
             Self::Deactivated => "deactivated",
             Self::PopupHidden => "popup_hidden",
+            Self::Settle => "settle",
         }
     }
 }
@@ -47,6 +50,7 @@ enum Epoch {
     Untrimmed,
     Visible,
     Low,
+    Settled,
 }
 
 #[derive(Default)]
@@ -69,7 +73,9 @@ impl IdleTrimScheduler {
             }
             self.started = true;
         }
-        if self.epoch == Epoch::Low
+        if (trigger == Trigger::Settle && self.epoch != Epoch::Low)
+            || (trigger != Trigger::Settle
+                && matches!(self.epoch, Epoch::Low | Epoch::Settled))
             || (self.epoch == Epoch::Visible
                 && !matches!(
                     trigger,
@@ -144,6 +150,13 @@ impl IdleTrimScheduler {
             return None;
         }
         self.pending = None;
+        if trigger == Trigger::Settle {
+            if !low {
+                return None;
+            }
+            self.epoch = Epoch::Settled;
+            return Some(Trigger::Settle);
+        }
         if self.epoch == Epoch::Visible && !low {
             return None;
         }
@@ -278,6 +291,9 @@ pub fn request<R: Runtime>(app: &AppHandle<R>, trigger: Trigger) {
                             .fire(generation, Instant::now(), busy, low, foreground);
                     if let Some(trigger) = trigger {
                         trim(&handle, trigger, low);
+                        if low && trigger != Trigger::Settle {
+                            request(&handle, Trigger::Settle);
+                        }
                     }
                     let _ = tx.send(());
                 })
@@ -362,12 +378,19 @@ fn trim<R: Runtime>(app: &AppHandle<R>, trigger: Trigger, low: bool) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    let sidecar = app
+        .try_state::<crate::sidecar::SidecarState>()
+        .and_then(|state| state.pid());
     let _ = window.with_webview(move |webview| unsafe {
         use webview2_com::Microsoft::Web::WebView2::Win32::*;
         use windows_core::Interface;
         let start = Instant::now();
         let mut pids = std::collections::BTreeSet::new();
         pids.insert(std::process::id());
+        let sidecar_included = sidecar.is_some();
+        if let Some(pid) = sidecar {
+            pids.insert(pid);
+        }
         let mut browser = 0;
         // One environment serves all three windows, so this covers every renderer.
         let result: windows_core::Result<()> = (|| {
@@ -409,9 +432,10 @@ fn trim<R: Runtime>(app: &AppHandle<R>, trigger: Trigger, low: bool) {
         }
         let (trimmed, failed) = trim_processes(&pids);
         log::info!(
-            "idle_memory_trim trigger={} low={} processes={} trimmed={} failed={} elapsed_ms={}",
+            "idle_memory_trim trigger={} low={} sidecar={} processes={} trimmed={} failed={} elapsed_ms={}",
             trigger.name(),
             low,
+            sidecar_included,
             pids.len(),
             trimmed,
             failed,
@@ -526,13 +550,29 @@ fn trim_processes(pids: &std::collections::BTreeSet<u32>) -> (usize, usize) {
 mod tests {
     use super::*;
 
-    const ALL: [Trigger; 5] = [
+    const ALL: [Trigger; 6] = [
         Trigger::Startup,
         Trigger::Hidden,
         Trigger::Minimized,
         Trigger::Deactivated,
         Trigger::PopupHidden,
+        Trigger::Settle,
     ];
+
+    fn enter_low_epoch(scheduler: &mut IdleTrimScheduler, now: Instant) {
+        let generation = scheduler.request(Trigger::Startup, now).unwrap();
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                now + Trigger::Startup.delay(),
+                false,
+                true,
+                false,
+            ),
+            Some(Trigger::Startup)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Low);
+    }
 
     #[test]
     fn delays_are_exact_and_never_fire_early() {
@@ -542,15 +582,25 @@ mod tests {
             (Trigger::Minimized, 3),
             (Trigger::Deactivated, 15),
             (Trigger::PopupHidden, 3),
+            (Trigger::Settle, 300),
         ] {
             let mut s = IdleTrimScheduler::default();
             let now = Instant::now();
+            if trigger == Trigger::Settle {
+                enter_low_epoch(&mut s, now);
+            }
             assert_eq!(trigger.delay(), Duration::from_secs(seconds));
-            let generation = s.request(trigger, now).unwrap();
-            let deadline = now + Duration::from_secs(seconds);
-            assert_eq!(s.fire(generation, deadline - Duration::from_millis(1), false, false, false), None);
-            assert_eq!(s.fire(generation, deadline, false, false, false), Some(trigger));
-            assert_eq!(s.fire(generation, deadline, false, false, false), None);
+            let request_at = if trigger == Trigger::Settle {
+                now + Trigger::Startup.delay()
+            } else {
+                now
+            };
+            let generation = s.request(trigger, request_at).unwrap();
+            let deadline = request_at + Duration::from_secs(seconds);
+            let low = trigger == Trigger::Settle;
+            assert_eq!(s.fire(generation, deadline - Duration::from_millis(1), false, low, false), None);
+            assert_eq!(s.fire(generation, deadline, false, low, false), Some(trigger));
+            assert_eq!(s.fire(generation, deadline, false, low, false), None);
         }
 
         let mut s = IdleTrimScheduler::default();
@@ -566,6 +616,181 @@ mod tests {
             ),
             Some(Trigger::Hidden)
         );
+    }
+
+    #[test]
+    fn settle_is_only_accepted_in_low_epoch() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        assert!(scheduler.request(Trigger::Settle, now).is_none());
+
+        let visible = scheduler.request(Trigger::Startup, now).unwrap();
+        assert_eq!(
+            scheduler.fire(visible, now + Trigger::Startup.delay(), false, false, false),
+            Some(Trigger::Startup)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Visible);
+        assert!(scheduler
+            .request(Trigger::Settle, now + Trigger::Startup.delay())
+            .is_none());
+
+        let low_at = now + Trigger::Startup.delay() + Duration::from_secs(1);
+        let low = scheduler.request(Trigger::Hidden, low_at).unwrap();
+        assert_eq!(
+            scheduler.fire(low, low_at + Trigger::Hidden.delay(), false, true, false),
+            Some(Trigger::Hidden)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Low);
+        assert!(scheduler
+            .request(Trigger::Settle, low_at + Trigger::Hidden.delay())
+            .is_some());
+    }
+
+    #[test]
+    fn settle_fires_after_exact_delay_and_locks_settled_epoch() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        enter_low_epoch(&mut scheduler, now);
+        let requested_at = now + Trigger::Startup.delay();
+        let generation = scheduler.request(Trigger::Settle, requested_at).unwrap();
+        let deadline = requested_at + Duration::from_secs(300);
+        assert_eq!(Trigger::Settle.delay(), Duration::from_secs(300));
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                deadline - Duration::from_millis(1),
+                false,
+                true,
+                false,
+            ),
+            None
+        );
+        assert_eq!(
+            scheduler.fire(generation, deadline, false, true, false),
+            Some(Trigger::Settle)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Settled);
+        assert!(scheduler.pending.is_none());
+        // Reset startup's one-shot guard to isolate Settled-epoch admission.
+        scheduler.started = false;
+        for trigger in ALL {
+            assert!(scheduler.request(trigger, deadline).is_none(), "{trigger:?}");
+        }
+    }
+
+    #[test]
+    fn settle_dropped_if_main_is_visible() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        enter_low_epoch(&mut scheduler, now);
+        let requested_at = now + Trigger::Startup.delay();
+        let generation = scheduler.request(Trigger::Settle, requested_at).unwrap();
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                requested_at + Trigger::Settle.delay(),
+                false,
+                false,
+                false,
+            ),
+            None
+        );
+        assert_eq!(scheduler.epoch, Epoch::Low);
+        assert!(scheduler.pending.is_none());
+    }
+
+    #[test]
+    fn activate_cancels_pending_settle_and_opens_new_epoch() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        enter_low_epoch(&mut scheduler, now);
+        let generation = scheduler
+            .request(Trigger::Settle, now + Trigger::Startup.delay())
+            .unwrap();
+        scheduler.activate();
+        assert!(scheduler.generation > generation);
+        assert!(scheduler.pending.is_none());
+        assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                now + Trigger::Startup.delay() + Trigger::Settle.delay(),
+                false,
+                true,
+                false,
+            ),
+            None
+        );
+        assert!(scheduler
+            .request(Trigger::Hidden, now + Trigger::Startup.delay())
+            .is_some());
+    }
+
+    #[test]
+    fn focused_true_cancels_pending_settle_and_opens_new_epoch() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        enter_low_epoch(&mut scheduler, now);
+        let generation = scheduler
+            .request(Trigger::Settle, now + Trigger::Startup.delay())
+            .unwrap();
+        scheduler.focused(true);
+        assert!(scheduler.generation > generation);
+        assert!(scheduler.pending.is_none());
+        assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+        assert_eq!(scheduler.fire(generation, now + Duration::from_secs(400), false, true, false), None);
+        assert!(scheduler
+            .request(Trigger::Hidden, now + Trigger::Startup.delay())
+            .is_some());
+    }
+
+    #[test]
+    fn settle_drops_when_focused_or_foreground_and_postpones_when_busy() {
+        let now = Instant::now();
+        for focused in [true, false] {
+            let mut scheduler = IdleTrimScheduler::default();
+            enter_low_epoch(&mut scheduler, now);
+            let requested_at = now + Trigger::Startup.delay();
+            let generation = scheduler.request(Trigger::Settle, requested_at).unwrap();
+            if focused {
+                scheduler.main_focused = true;
+            }
+            assert_eq!(
+                scheduler.fire(
+                    generation,
+                    requested_at + Trigger::Settle.delay(),
+                    false,
+                    true,
+                    !focused,
+                ),
+                None
+            );
+            assert_eq!(scheduler.epoch, Epoch::Low);
+            assert!(scheduler.pending.is_none());
+        }
+
+        let mut scheduler = IdleTrimScheduler::default();
+        enter_low_epoch(&mut scheduler, now);
+        let requested_at = now + Trigger::Startup.delay();
+        let generation = scheduler.request(Trigger::Settle, requested_at).unwrap();
+        let deadline = requested_at + Trigger::Settle.delay();
+        assert_eq!(scheduler.fire(generation, deadline, true, true, false), None);
+        assert_eq!(scheduler.pending, Some((Trigger::Settle, deadline + Trigger::Settle.delay())));
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                deadline + Trigger::Settle.delay() - Duration::from_millis(1),
+                false,
+                true,
+                false,
+            ),
+            None
+        );
+        assert_eq!(
+            scheduler.fire(generation, deadline + Trigger::Settle.delay(), false, true, false),
+            Some(Trigger::Settle)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Settled);
     }
 
     #[test]
@@ -759,7 +984,10 @@ mod tests {
                 assert_eq!(s.fire(second, after + low.delay(), false, true, false), Some(low));
                 assert_eq!(s.epoch, Epoch::Low);
                 for trigger in ALL {
-                    assert!(s.request(trigger, after + low.delay()).is_none());
+                    assert_eq!(
+                        s.request(trigger, after + low.delay()).is_some(),
+                        trigger == Trigger::Settle
+                    );
                 }
                 s.activate();
                 assert_eq!(s.epoch, Epoch::Untrimmed);
@@ -779,7 +1007,10 @@ mod tests {
         );
         assert_eq!(s.epoch, Epoch::Low);
         for trigger in ALL {
-            assert!(s.request(trigger, now + Duration::from_secs(9)).is_none());
+            assert_eq!(
+                s.request(trigger, now + Duration::from_secs(9)).is_some(),
+                trigger == Trigger::Settle
+            );
         }
     }
 

@@ -26,7 +26,7 @@ WebView2 process set, not the Rust host.
 External proof (`psapi!EmptyWorkingSet` on every PID of the tree): working set **695 → 1.7 MB**
 immediately and **22.6 MB after 60 s idle**; private unchanged (423 MB). The trim works for this app.
 
-The `text-helper` .NET sidecar is a separate process (not a child of WebView2) and is out of scope.
+The `text-helper` .NET sidecar is a separate process (not a child of WebView2); it is handled by the host's same-epoch trim (see Sidecar below).
 
 ## Design
 
@@ -97,8 +97,24 @@ Pitfalls from 009 §4 that this design addresses:
 | 6 s after minimize | **32.1** | 297.0 | `trigger=minimized low=true processes=9 trimmed=9 elapsed_ms=36` |
 | Restore → minimize again | — | — | no trim while restored; `trigger=minimized low=true elapsed_ms=21` |
 
+   **Regrowth while hidden in the tray** (sidecar branch, 2026-11-03): after the `hidden` trim the tree
+   regrows to a plateau of ~120 MB working set within ~3 minutes (136 MB at 50 s, 170 MB at 2 min), with
+   private unchanged at ~280 MB. A second, external `EmptyWorkingSet` after LOW had settled regrew the same
+   way (34 → 117 MB in 3 min), so the regrowth does not come from the trim order. The tree is idle (16 ms CPU in 60 s, all of it
+   in the browser process), there is no JS polling in `src/`, and the host log is quiet, so this is
+   Chromium/V8 and .NET re-touching their live heaps, not a loop to fix. Each renderer settles near its
+   private size (~20–25 MB). A further trim would only reset the plateau, which 009 forbids as periodic.
+
    The popup round trip was not driven live: showing the popup activates it and would take the user's
    focus. The scheduler tests cover it; it still needs one manual check.
+
+## Sidecar (text-helper)
+
+The sidecar measured 49 MB working set and 14.8 MB private. `EmptyWorkingSet` reduced working set
+49 → 0 MB, then it regrew to a ~13 MB plateau within 2 minutes; private stayed unchanged. The host
+trims the sidecar in the same epoch trim, using the PID tracked at spawn and cleared on stop/terminate.
+.NET GC tuning was not pursued: private memory is only ~15 MB, while measured GC configuration impact
+is about 2% (guideline 008 §2).
 
 ## Out of scope
 
