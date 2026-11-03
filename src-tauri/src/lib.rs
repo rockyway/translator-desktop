@@ -598,13 +598,6 @@ pub fn run() {
 
             Ok(())
         })
-        .on_page_load(|webview, payload| {
-            if webview.label() == "main"
-                && payload.event() == tauri::webview::PageLoadEvent::Finished
-            {
-                memory_trim::request(webview.app_handle(), memory_trim::Trigger::Startup);
-            }
-        })
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 match event {

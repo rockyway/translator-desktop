@@ -44,11 +44,16 @@ native trim and memory target exist only on Windows (no-ops elsewhere).
 
 | Trigger | Delay | Hook |
 |---|---|---|
-| Startup (main `PageLoadEvent::Finished`) | 8 s | `on_page_load` |
 | Main hidden to tray | 3 s | `window_visibility::hide_window("main")` |
 | Main minimized | 3 s | `WindowEvent::Resized` + `is_minimized()` |
-| Main deactivated while visible | 15 s | `WindowEvent::Focused(false)` |
-| Popup / confirmation hidden while main unfocused | 3 s | `window_visibility::hide_window(popup)` |
+| Popup / confirmation hidden while main is hidden or minimized | 3 s | `window_visibility::hide_window(popup)` |
+| Settle, once after each of the three above (plan 006) | 300 s | requested after the LOW trim |
+| Main left visible behind other apps | **3600 s** | `WindowEvent::Focused(false)`; popup close while main is visible re-arms it |
+
+Updated 2026-11-03 at the user's request: trims run when the app goes to the tray or is minimized. A window left
+behind other apps is trimmed only after 1 hour, without LOW and without a settle trim, and that trim is
+cancelled when the window comes back to the front. The startup trim was removed: it only fired once main
+was already behind another app.
 
 - **Cancel and new epoch:** main focused, shown or restored; popup or confirmation shown.
 - **Admission foreground check:** at fire time, compare the main HWND with the Win32 foreground
