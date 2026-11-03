@@ -13,7 +13,10 @@ use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
 #[cfg(target_os = "windows")]
-use std::sync::Once;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Once,
+};
 
 #[cfg(target_os = "windows")]
 static JOB_INIT: Once = Once::new();
@@ -138,6 +141,8 @@ fn kill_existing_text_monitor() {
 pub struct SidecarState {
     #[cfg(target_os = "windows")]
     child: Arc<Mutex<Option<CommandChild>>>,
+    #[cfg(target_os = "windows")]
+    pid: Arc<AtomicU32>,
     #[cfg(not(target_os = "windows"))]
     _running: Arc<Mutex<bool>>,
 }
@@ -147,6 +152,8 @@ impl SidecarState {
         Self {
             #[cfg(target_os = "windows")]
             child: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "windows")]
+            pid: Arc::new(AtomicU32::new(0)),
             #[cfg(not(target_os = "windows"))]
             _running: Arc::new(Mutex::new(false)),
         }
@@ -169,7 +176,13 @@ impl SidecarState {
         log::info!("Sidecar: Starting text-helper...");
 
         let sidecar_command = match app.shell().sidecar("text-helper") {
-            Ok(cmd) => cmd,
+            // The hook's task pool allocates per input event; with the default gen0
+            // budget (~18 MB here) that churn regrows the working set after every
+            // idle trim. A 2 MB budget bounds it; non-concurrent GC drops the
+            // background GC thread. Plan 006.
+            Ok(cmd) => cmd
+                .env("DOTNET_GCgen0size", "0x200000")
+                .env("DOTNET_gcConcurrent", "0"),
             Err(e) => {
                 let msg = format!("Failed to create sidecar command: {}", e);
                 log::error!("Sidecar: {}", msg);
@@ -186,9 +199,12 @@ impl SidecarState {
             }
         };
 
+        let child_pid = child.pid();
+        self.set_pid(child_pid);
         *guard = Some(child);
         log::info!("Sidecar: Text monitor started successfully");
 
+        let sidecar_pid = Arc::clone(&self.pid);
         tauri::async_runtime::spawn(async move {
             use tauri_plugin_shell::process::CommandEvent;
 
@@ -219,6 +235,7 @@ impl SidecarState {
                             payload.code,
                             payload.signal
                         );
+                        Self::clear_pid_if(&sidecar_pid, child_pid);
                         break;
                     }
                     _ => {}
@@ -241,6 +258,7 @@ impl SidecarState {
         let mut guard = self.child.lock().await;
 
         if let Some(child) = guard.take() {
+            self.pid.store(0, Ordering::Release);
             log::info!("Sidecar: Stopping text-helper...");
             child
                 .kill()
@@ -254,6 +272,25 @@ impl SidecarState {
     #[cfg(not(target_os = "windows"))]
     pub async fn stop(&self) -> Result<(), String> {
         Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn set_pid(&self, pid: u32) {
+        self.pid.store(pid, Ordering::Release);
+    }
+
+    #[cfg(target_os = "windows")]
+    fn clear_pid_if(pid: &AtomicU32, child_pid: u32) {
+        let _ = pid.compare_exchange(child_pid, 0, Ordering::AcqRel, Ordering::Acquire);
+    }
+
+    /// Returns the sidecar PID without locking, for synchronous memory trimming.
+    #[cfg(target_os = "windows")]
+    pub fn pid(&self) -> Option<u32> {
+        match self.pid.load(Ordering::Acquire) {
+            0 => None,
+            pid => Some(pid),
+        }
     }
 
     /// Checks if the text monitor is currently running.
@@ -271,6 +308,26 @@ impl SidecarState {
 impl Default for SidecarState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(all(test, windows))]
+mod pid_tests {
+    use super::SidecarState;
+
+    #[test]
+    fn tracks_sidecar_pid_and_clears_only_the_matching_child() {
+        let state = SidecarState::new();
+        assert_eq!(state.pid(), None);
+
+        state.set_pid(1234);
+        assert_eq!(state.pid(), Some(1234));
+
+        SidecarState::clear_pid_if(&state.pid, 5678);
+        assert_eq!(state.pid(), Some(1234));
+
+        SidecarState::clear_pid_if(&state.pid, 1234);
+        assert_eq!(state.pid(), None);
     }
 }
 

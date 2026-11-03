@@ -6,7 +6,7 @@ $hostProcess = Get-Process -Id $RootPid -ErrorAction Stop
 $all = @(Get-CimInstance Win32_Process)
 $owned = [System.Collections.Generic.HashSet[int]]::new()
 [void]$owned.Add($RootPid)
-# Walk through intermediate descendants too, but report only the host and WebView2.
+# Walk through intermediate descendants too, but report only the host, WebView2, and text-helper.
 do {
     $added = $false
     foreach ($process in $all) {
@@ -19,9 +19,10 @@ $rows = @(
     foreach ($process in $all) {
         $processId = [int]$process.ProcessId
         if (-not $owned.Contains($processId)) { continue }
-        if ($processId -ne $RootPid -and $process.Name -ine 'msedgewebview2.exe') { continue }
+        if ($processId -ne $RootPid -and $process.Name -ine 'msedgewebview2.exe' -and $process.Name -ine 'text-helper.exe') { continue }
         $role = 'unknown'
         if ($processId -eq $RootPid) { $role = 'host' }
+        elseif ($process.Name -ieq 'text-helper.exe') { $role = 'sidecar' }
         elseif ($null -ne $process.CommandLine) {
             if ($process.CommandLine -match '--type=([^\s"]+)') {
                 $role = switch ($Matches[1]) {

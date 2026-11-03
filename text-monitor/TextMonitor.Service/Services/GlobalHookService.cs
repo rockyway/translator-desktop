@@ -18,6 +18,11 @@ public class GlobalHookService : IGlobalHookService
     private bool _disposed;
     private string? _lastError;
 
+    // Mouse buttons currently held. Moves with no button held are dropped before any
+    // allocation: system-wide mouse movement otherwise churns gen0 and grows the
+    // sidecar's working set while the app sits idle in the tray.
+    private int _buttonsHeld;
+
     // Health monitoring fields
     private Task? _healthMonitorTask;
     private CancellationTokenSource? _healthMonitorCts;
@@ -59,6 +64,7 @@ public class GlobalHookService : IGlobalHookService
 
             // Create and configure the hook
             _hook = new TaskPoolGlobalHook();
+            Volatile.Write(ref _buttonsHeld, 0);
 
             // Subscribe to mouse events
             _hook.MousePressed += OnMousePressed;
@@ -143,6 +149,7 @@ public class GlobalHookService : IGlobalHookService
 
                         // Recreate hook
                         _hook = new TaskPoolGlobalHook();
+                        Volatile.Write(ref _buttonsHeld, 0);
                         _hook.MousePressed += OnMousePressed;
                         _hook.MouseReleased += OnMouseReleased;
                         _hook.MouseMoved += OnMouseMoved;
@@ -239,6 +246,7 @@ public class GlobalHookService : IGlobalHookService
     /// </summary>
     private void OnMousePressed(object? sender, MouseHookEventArgs e)
     {
+        Interlocked.Increment(ref _buttonsHeld);
         try
         {
             var eventData = CreateMouseEventData(e);
@@ -260,6 +268,10 @@ public class GlobalHookService : IGlobalHookService
     /// </summary>
     private void OnMouseReleased(object? sender, MouseHookEventArgs e)
     {
+        // Clamp at 0: a press can be missed (hook restarted, elevated window had focus).
+        int held;
+        do { held = Volatile.Read(ref _buttonsHeld); }
+        while (held > 0 && Interlocked.CompareExchange(ref _buttonsHeld, held - 1, held) != held);
         try
         {
             var eventData = CreateMouseEventData(e);
@@ -281,6 +293,12 @@ public class GlobalHookService : IGlobalHookService
     /// </summary>
     private void OnMouseMoved(object? sender, MouseHookEventArgs e)
     {
+        // The only consumer ignores moves unless the left button is held.
+        if (MouseMoved is null || Volatile.Read(ref _buttonsHeld) == 0)
+        {
+            return;
+        }
+
         try
         {
             var eventData = CreateMouseEventData(e);
