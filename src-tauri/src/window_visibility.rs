@@ -13,7 +13,7 @@
 //! `window.show()` on a window whose webview is hidden renders blank.
 
 use tauri::webview::Webview;
-use tauri::{Runtime, WebviewWindow};
+use tauri::{Manager, Runtime, WebviewWindow};
 
 /// Show a window and resume its webview rendering.
 ///
@@ -21,7 +21,19 @@ use tauri::{Runtime, WebviewWindow};
 pub fn show_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
     let webview: &Webview<R> = window.as_ref();
     let _ = webview.show();
-    window.show()
+    window.show()?;
+
+    match window.label() {
+        "main" => {
+            // A minimized main stays in its epoch; restoring raises Resized, which activates.
+            if matches!(window.is_minimized(), Ok(false)) {
+                crate::memory_trim::activate(window.app_handle());
+            }
+        }
+        "popup" | "confirmation" => crate::memory_trim::popup_shown(window.app_handle()),
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Hide a window and stop its webview rendering.
@@ -31,6 +43,18 @@ pub fn hide_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
     window.hide()?;
     let webview: &Webview<R> = window.as_ref();
     let _ = webview.hide();
+
+    match window.label() {
+        "main" => crate::memory_trim::request(
+            window.app_handle(),
+            crate::memory_trim::Trigger::Hidden,
+        ),
+        "popup" | "confirmation" => crate::memory_trim::request(
+            window.app_handle(),
+            crate::memory_trim::Trigger::PopupHidden,
+        ),
+        _ => {}
+    }
     Ok(())
 }
 
