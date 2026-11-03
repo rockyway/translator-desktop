@@ -1,6 +1,8 @@
 //! Idle working-set trim for the host, its WebView2 process tree, and the .NET sidecar (Windows).
 //!
-//! One visible trim, at most one subsequent LOW trim, and one settle trim 5 minutes after the LOW trim per quiet epoch, never periodic.
+//! Low trims run only while main is hidden to the tray or minimized; one low trim per epoch
+//! plus one settle trim 300 s later. If main stays visible behind another app, one deactivated
+//! trim may run after 3600 s. Trims are never periodic.
 //! See docs/plan/005-idle-memory-trim.md. Native work stays on the
 //! main (webview) thread; detached tasks own `Arc`s, never `State` borrows.
 use std::{
@@ -15,7 +17,6 @@ const POPUP_LABELS: [&str; 2] = ["popup", "confirmation"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trigger {
-    Startup,
     Hidden,
     Minimized,
     Deactivated,
@@ -25,8 +26,7 @@ pub enum Trigger {
 impl Trigger {
     fn delay(self) -> Duration {
         Duration::from_secs(match self {
-            Self::Startup => 8,
-            Self::Deactivated => 15,
+            Self::Deactivated => 3600,
             Self::Settle => 300,
             _ => 3,
         })
@@ -34,7 +34,6 @@ impl Trigger {
     #[cfg(windows)]
     fn name(self) -> &'static str {
         match self {
-            Self::Startup => "startup",
             Self::Hidden => "hidden",
             Self::Minimized => "minimized",
             Self::Deactivated => "deactivated",
@@ -61,26 +60,15 @@ pub struct IdleTrimScheduler {
     // Main launches visible and usually focused, but the initial WebView2 GotFocus can
     // be missed, so admission also checks the foreground HWND at fire time.
     main_focused: bool,
-    started: bool,
     minimized: bool,
     task: Option<tauri::async_runtime::JoinHandle<()>>,
 }
 impl IdleTrimScheduler {
     fn request(&mut self, trigger: Trigger, now: Instant) -> Option<u64> {
-        if trigger == Trigger::Startup {
-            if self.started {
-                return None;
-            }
-            self.started = true;
-        }
         if (trigger == Trigger::Settle && self.epoch != Epoch::Low)
-            || (trigger != Trigger::Settle
-                && matches!(self.epoch, Epoch::Low | Epoch::Settled))
-            || (self.epoch == Epoch::Visible
-                && !matches!(
-                    trigger,
-                    Trigger::Hidden | Trigger::Minimized | Trigger::PopupHidden
-                ))
+            || (trigger == Trigger::Deactivated && self.epoch != Epoch::Untrimmed)
+            || (matches!(trigger, Trigger::Hidden | Trigger::Minimized | Trigger::PopupHidden)
+                && !matches!(self.epoch, Epoch::Untrimmed | Epoch::Visible))
             || (trigger == Trigger::PopupHidden && self.main_focused)
         {
             return None;
@@ -137,9 +125,7 @@ impl IdleTrimScheduler {
         if now < deadline {
             return None;
         }
-        // Main in use drops the request instead of re-polling while the user works:
-        // leaving main raises its own trigger (Focused(false), hide, minimize). The
-        // epoch is not consumed, so that later trigger gets its full delay.
+        // Main in use drops the request instead of re-polling while the user works.
         if self.main_focused || foreground {
             self.pending = None;
             return None;
@@ -149,18 +135,29 @@ impl IdleTrimScheduler {
             self.pending = Some((trigger, now + trigger.delay()));
             return None;
         }
+        if !low {
+            match trigger {
+                Trigger::Deactivated => {
+                    self.pending = None;
+                    self.epoch = Epoch::Visible;
+                    return Some(trigger);
+                }
+                Trigger::PopupHidden => {
+                    self.pending = Some((Trigger::Deactivated, now + Trigger::Deactivated.delay()));
+                    return None;
+                }
+                _ => {
+                    self.pending = None;
+                    return None;
+                }
+            }
+        }
         self.pending = None;
         if trigger == Trigger::Settle {
-            if !low {
-                return None;
-            }
             self.epoch = Epoch::Settled;
-            return Some(Trigger::Settle);
+        } else {
+            self.epoch = Epoch::Low;
         }
-        if self.epoch == Epoch::Visible && !low {
-            return None;
-        }
-        self.epoch = if low { Epoch::Low } else { Epoch::Visible };
         Some(trigger)
     }
 }
@@ -550,163 +547,371 @@ fn trim_processes(pids: &std::collections::BTreeSet<u32>) -> (usize, usize) {
 mod tests {
     use super::*;
 
-    const ALL: [Trigger; 6] = [
-        Trigger::Startup,
+    const ALL: [Trigger; 5] = [
         Trigger::Hidden,
         Trigger::Minimized,
         Trigger::Deactivated,
         Trigger::PopupHidden,
         Trigger::Settle,
     ];
+    const LOW_TRIGGERS: [Trigger; 3] = [
+        Trigger::Hidden,
+        Trigger::Minimized,
+        Trigger::PopupHidden,
+    ];
 
-    fn enter_low_epoch(scheduler: &mut IdleTrimScheduler, now: Instant) {
-        let generation = scheduler.request(Trigger::Startup, now).unwrap();
+    fn enter_low_epoch(scheduler: &mut IdleTrimScheduler, now: Instant, trigger: Trigger) {
+        let generation = scheduler.request(trigger, now).unwrap();
+        assert_eq!(
+            scheduler.fire(generation, now + trigger.delay(), false, true, false),
+            Some(trigger)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Low);
+    }
+
+    fn enter_visible_epoch(scheduler: &mut IdleTrimScheduler, now: Instant) {
+        let generation = scheduler.request(Trigger::Deactivated, now).unwrap();
         assert_eq!(
             scheduler.fire(
                 generation,
-                now + Trigger::Startup.delay(),
+                now + Trigger::Deactivated.delay(),
+                false,
+                false,
+                false,
+            ),
+            Some(Trigger::Deactivated)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Visible);
+    }
+
+    fn enter_settled_epoch(scheduler: &mut IdleTrimScheduler, now: Instant, trigger: Trigger) {
+        enter_low_epoch(scheduler, now, trigger);
+        let settle_at = now + trigger.delay();
+        let generation = scheduler.request(Trigger::Settle, settle_at).unwrap();
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                settle_at + Trigger::Settle.delay(),
                 false,
                 true,
                 false,
             ),
-            Some(Trigger::Startup)
+            Some(Trigger::Settle)
         );
-        assert_eq!(scheduler.epoch, Epoch::Low);
+        assert_eq!(scheduler.epoch, Epoch::Settled);
     }
 
     #[test]
     fn delays_are_exact_and_never_fire_early() {
-        for (trigger, seconds) in [
-            (Trigger::Startup, 8),
-            (Trigger::Hidden, 3),
-            (Trigger::Minimized, 3),
-            (Trigger::Deactivated, 15),
-            (Trigger::PopupHidden, 3),
-            (Trigger::Settle, 300),
-        ] {
-            let mut s = IdleTrimScheduler::default();
+        for trigger in ALL {
+            let mut scheduler = IdleTrimScheduler::default();
             let now = Instant::now();
-            if trigger == Trigger::Settle {
-                enter_low_epoch(&mut s, now);
-            }
-            assert_eq!(trigger.delay(), Duration::from_secs(seconds));
-            let request_at = if trigger == Trigger::Settle {
-                now + Trigger::Startup.delay()
-            } else {
-                now
+            let (request_at, low) = match trigger {
+                Trigger::Settle => {
+                    enter_low_epoch(&mut scheduler, now, Trigger::Hidden);
+                    (now + Trigger::Hidden.delay(), true)
+                }
+                Trigger::Deactivated => (now, false),
+                _ => (now, true),
             };
-            let generation = s.request(trigger, request_at).unwrap();
-            let deadline = request_at + Duration::from_secs(seconds);
-            let low = trigger == Trigger::Settle;
-            assert_eq!(s.fire(generation, deadline - Duration::from_millis(1), false, low, false), None);
-            assert_eq!(s.fire(generation, deadline, false, low, false), Some(trigger));
-            assert_eq!(s.fire(generation, deadline, false, low, false), None);
+            let delay = trigger.delay();
+            assert_eq!(
+                delay,
+                Duration::from_secs(match trigger {
+                    Trigger::Deactivated => 3600,
+                    Trigger::Settle => 300,
+                    _ => 3,
+                })
+            );
+            let generation = scheduler.request(trigger, request_at).unwrap();
+            let deadline = request_at + delay;
+            assert_eq!(
+                scheduler.fire(
+                    generation,
+                    deadline - Duration::from_millis(1),
+                    false,
+                    low,
+                    false,
+                ),
+                None
+            );
+            assert_eq!(scheduler.fire(generation, deadline, false, low, false), Some(trigger));
+            assert_eq!(scheduler.fire(generation, deadline, false, low, false), None);
         }
-
-        let mut s = IdleTrimScheduler::default();
-        let now = Instant::now();
-        let generation = s.request(Trigger::Hidden, now).unwrap();
-        assert_eq!(
-            s.fire(
-                generation,
-                now + Trigger::Hidden.delay() + Duration::from_millis(500),
-                false,
-                false,
-                false,
-            ),
-            Some(Trigger::Hidden)
-        );
     }
 
     #[test]
-    fn settle_is_only_accepted_in_low_epoch() {
+    fn non_low_hidden_minimized_and_settle_are_dropped_without_consuming_epoch() {
         let now = Instant::now();
-        let mut scheduler = IdleTrimScheduler::default();
-        assert!(scheduler.request(Trigger::Settle, now).is_none());
+        for trigger in [Trigger::Hidden, Trigger::Minimized, Trigger::Settle] {
+            let mut scheduler = IdleTrimScheduler::default();
+            let generation = if trigger == Trigger::Settle {
+                // Settle is normally accepted only in Low; probe the fire-time gate.
+                scheduler.generation = 1;
+                scheduler.pending = Some((trigger, now + trigger.delay()));
+                1
+            } else {
+                scheduler.request(trigger, now).unwrap()
+            };
+            assert_eq!(
+                scheduler.fire(generation, now + trigger.delay(), false, false, false),
+                None
+            );
+            assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+            assert!(scheduler.pending.is_none());
 
-        let visible = scheduler.request(Trigger::Startup, now).unwrap();
-        assert_eq!(
-            scheduler.fire(visible, now + Trigger::Startup.delay(), false, false, false),
-            Some(Trigger::Startup)
-        );
-        assert_eq!(scheduler.epoch, Epoch::Visible);
-        assert!(scheduler
-            .request(Trigger::Settle, now + Trigger::Startup.delay())
-            .is_none());
-
-        let low_at = now + Trigger::Startup.delay() + Duration::from_secs(1);
-        let low = scheduler.request(Trigger::Hidden, low_at).unwrap();
-        assert_eq!(
-            scheduler.fire(low, low_at + Trigger::Hidden.delay(), false, true, false),
-            Some(Trigger::Hidden)
-        );
-        assert_eq!(scheduler.epoch, Epoch::Low);
-        assert!(scheduler
-            .request(Trigger::Settle, low_at + Trigger::Hidden.delay())
-            .is_some());
+            let hide_at = now + Duration::from_secs(4000);
+            let hidden = scheduler.request(Trigger::Hidden, hide_at).unwrap();
+            assert_eq!(
+                scheduler.fire(
+                    hidden,
+                    hide_at + Trigger::Hidden.delay(),
+                    false,
+                    true,
+                    false,
+                ),
+                Some(Trigger::Hidden)
+            );
+            assert_eq!(scheduler.epoch, Epoch::Low);
+        }
     }
 
     #[test]
-    fn settle_fires_after_exact_delay_and_locks_settled_epoch() {
+    fn popup_hidden_trims_while_main_is_hidden_and_rearms_when_visible() {
         let now = Instant::now();
-        let mut scheduler = IdleTrimScheduler::default();
-        enter_low_epoch(&mut scheduler, now);
-        let requested_at = now + Trigger::Startup.delay();
-        let generation = scheduler.request(Trigger::Settle, requested_at).unwrap();
-        let deadline = requested_at + Duration::from_secs(300);
-        assert_eq!(Trigger::Settle.delay(), Duration::from_secs(300));
+        let mut hidden = IdleTrimScheduler::default();
+        let generation = hidden.request(Trigger::PopupHidden, now).unwrap();
         assert_eq!(
-            scheduler.fire(
+            hidden.fire(
                 generation,
-                deadline - Duration::from_millis(1),
+                now + Trigger::PopupHidden.delay(),
                 false,
                 true,
                 false,
             ),
-            None
+            Some(Trigger::PopupHidden)
         );
-        assert_eq!(
-            scheduler.fire(generation, deadline, false, true, false),
-            Some(Trigger::Settle)
-        );
-        assert_eq!(scheduler.epoch, Epoch::Settled);
-        assert!(scheduler.pending.is_none());
-        // Reset startup's one-shot guard to isolate Settled-epoch admission.
-        scheduler.started = false;
-        for trigger in ALL {
-            assert!(scheduler.request(trigger, deadline).is_none(), "{trigger:?}");
-        }
-    }
+        assert_eq!(hidden.epoch, Epoch::Low);
 
-    #[test]
-    fn settle_dropped_if_main_is_visible() {
-        let now = Instant::now();
-        let mut scheduler = IdleTrimScheduler::default();
-        enter_low_epoch(&mut scheduler, now);
-        let requested_at = now + Trigger::Startup.delay();
-        let generation = scheduler.request(Trigger::Settle, requested_at).unwrap();
+        let mut visible = IdleTrimScheduler::default();
+        let generation = visible.request(Trigger::PopupHidden, now).unwrap();
+        let popup_deadline = now + Trigger::PopupHidden.delay();
+        assert_eq!(visible.fire(generation, popup_deadline, false, false, false), None);
+        assert_eq!(visible.epoch, Epoch::Untrimmed);
         assert_eq!(
-            scheduler.fire(
+            visible.pending,
+            Some((
+                Trigger::Deactivated,
+                popup_deadline + Trigger::Deactivated.delay()
+            ))
+        );
+        assert_eq!(visible.generation, generation);
+        assert_eq!(
+            visible.fire(
                 generation,
-                requested_at + Trigger::Settle.delay(),
+                popup_deadline + Trigger::Deactivated.delay() - Duration::from_millis(1),
                 false,
                 false,
                 false,
             ),
             None
         );
-        assert_eq!(scheduler.epoch, Epoch::Low);
+        assert_eq!(
+            visible.fire(
+                generation,
+                popup_deadline + Trigger::Deactivated.delay(),
+                false,
+                false,
+                false,
+            ),
+            Some(Trigger::Deactivated)
+        );
+        assert_eq!(visible.epoch, Epoch::Visible);
+    }
+
+    #[test]
+    fn hidden_low_settle_lifecycle_and_activate_reopens_epoch() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        assert!(scheduler.request(Trigger::Settle, now).is_none());
+        enter_settled_epoch(&mut scheduler, now, Trigger::Hidden);
         assert!(scheduler.pending.is_none());
+        for trigger in ALL {
+            assert!(scheduler.request(trigger, now + Duration::from_secs(400)).is_none());
+        }
+
+        scheduler.activate();
+        assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+        let generation = scheduler
+            .request(Trigger::Hidden, now + Duration::from_secs(400))
+            .unwrap();
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                now + Duration::from_secs(400) + Trigger::Hidden.delay(),
+                false,
+                true,
+                false,
+            ),
+            Some(Trigger::Hidden)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Low);
+    }
+
+    #[test]
+    fn minimized_follows_low_settle_lifecycle() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        enter_settled_epoch(&mut scheduler, now, Trigger::Minimized);
+        assert_eq!(scheduler.epoch, Epoch::Settled);
+        assert!(scheduler
+            .request(Trigger::Minimized, now + Duration::from_secs(400))
+            .is_none());
+        scheduler.activate();
+        assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+        assert!(scheduler
+            .request(Trigger::Minimized, now + Duration::from_secs(400))
+            .is_some());
+    }
+
+    #[test]
+    fn deactivated_trim_moves_to_visible_epoch_and_hidden_still_trims_low() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        enter_visible_epoch(&mut scheduler, now);
+        let hidden_at = now + Trigger::Deactivated.delay() + Duration::from_secs(1);
+        let hidden = scheduler.request(Trigger::Hidden, hidden_at).unwrap();
+        assert_eq!(
+            scheduler.fire(
+                hidden,
+                hidden_at + Trigger::Hidden.delay(),
+                false,
+                true,
+                false,
+            ),
+            Some(Trigger::Hidden)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Low);
+
+        let settle_at = hidden_at + Trigger::Hidden.delay();
+        let settle = scheduler.request(Trigger::Settle, settle_at).unwrap();
+        assert_eq!(
+            scheduler.fire(
+                settle,
+                settle_at + Trigger::Settle.delay(),
+                false,
+                true,
+                false,
+            ),
+            Some(Trigger::Settle)
+        );
+        assert_eq!(scheduler.epoch, Epoch::Settled);
+    }
+
+    #[test]
+    fn only_eligible_triggers_are_accepted_in_each_epoch() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        for trigger in [Trigger::Hidden, Trigger::Minimized, Trigger::Deactivated, Trigger::PopupHidden] {
+            assert!(scheduler.request(trigger, now).is_some(), "{trigger:?}");
+            scheduler.cancel();
+        }
+        assert!(scheduler.request(Trigger::Settle, now).is_none());
+
+        enter_visible_epoch(&mut scheduler, now);
+        for trigger in LOW_TRIGGERS {
+            assert!(scheduler
+                .request(trigger, now + Duration::from_secs(4000))
+                .is_some());
+            scheduler.cancel();
+        }
+        assert!(scheduler
+            .request(Trigger::Deactivated, now + Duration::from_secs(4000))
+            .is_none());
+        assert!(scheduler.request(Trigger::Settle, now).is_none());
+
+        enter_low_epoch(&mut scheduler, now + Duration::from_secs(5000), Trigger::Hidden);
+        for trigger in [Trigger::Hidden, Trigger::Minimized, Trigger::Deactivated, Trigger::PopupHidden] {
+            assert!(scheduler
+                .request(trigger, now + Duration::from_secs(6000))
+                .is_none());
+        }
+        assert!(scheduler
+            .request(Trigger::Settle, now + Duration::from_secs(6000))
+            .is_some());
+
+        let mut settled = IdleTrimScheduler::default();
+        enter_settled_epoch(&mut settled, now, Trigger::Minimized);
+        for trigger in ALL {
+            assert!(settled
+                .request(trigger, now + Duration::from_secs(4000))
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn activate_or_focus_cancels_pending_deactivation() {
+        let now = Instant::now();
+        for use_focus in [false, true] {
+            let mut scheduler = IdleTrimScheduler::default();
+            let generation = scheduler.request(Trigger::Deactivated, now).unwrap();
+            if use_focus {
+                scheduler.focused(true);
+            } else {
+                scheduler.activate();
+            }
+            assert!(scheduler.generation > generation);
+            assert!(scheduler.pending.is_none());
+            assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+            assert_eq!(
+                scheduler.fire(
+                    generation,
+                    now + Trigger::Deactivated.delay(),
+                    false,
+                    false,
+                    false,
+                ),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn foreground_drops_deactivation_without_consuming_epoch() {
+        let now = Instant::now();
+        let mut scheduler = IdleTrimScheduler::default();
+        let generation = scheduler.request(Trigger::Deactivated, now).unwrap();
+        let deadline = now + Trigger::Deactivated.delay();
+        assert_eq!(
+            scheduler.fire(generation, deadline, false, false, true),
+            None
+        );
+        assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+        assert!(scheduler.pending.is_none());
+
+        let hidden = scheduler.request(Trigger::Hidden, deadline).unwrap();
+        assert_eq!(
+            scheduler.fire(hidden, deadline + Trigger::Hidden.delay(), false, true, false),
+            Some(Trigger::Hidden)
+        );
+    }
+
+    #[test]
+    fn popup_hidden_is_rejected_while_main_is_focused() {
+        let mut scheduler = IdleTrimScheduler::default();
+        scheduler.focused(true);
+        assert!(scheduler
+            .request(Trigger::PopupHidden, Instant::now())
+            .is_none());
     }
 
     #[test]
     fn activate_cancels_pending_settle_and_opens_new_epoch() {
         let now = Instant::now();
         let mut scheduler = IdleTrimScheduler::default();
-        enter_low_epoch(&mut scheduler, now);
-        let generation = scheduler
-            .request(Trigger::Settle, now + Trigger::Startup.delay())
-            .unwrap();
+        enter_low_epoch(&mut scheduler, now, Trigger::Hidden);
+        let settle_at = now + Trigger::Hidden.delay();
+        let generation = scheduler.request(Trigger::Settle, settle_at).unwrap();
         scheduler.activate();
         assert!(scheduler.generation > generation);
         assert!(scheduler.pending.is_none());
@@ -714,34 +919,44 @@ mod tests {
         assert_eq!(
             scheduler.fire(
                 generation,
-                now + Trigger::Startup.delay() + Trigger::Settle.delay(),
+                settle_at + Trigger::Settle.delay(),
                 false,
                 true,
                 false,
             ),
             None
         );
-        assert!(scheduler
-            .request(Trigger::Hidden, now + Trigger::Startup.delay())
-            .is_some());
+        assert!(scheduler.request(Trigger::Hidden, settle_at).is_some());
     }
 
     #[test]
     fn focused_true_cancels_pending_settle_and_opens_new_epoch() {
         let now = Instant::now();
         let mut scheduler = IdleTrimScheduler::default();
-        enter_low_epoch(&mut scheduler, now);
-        let generation = scheduler
-            .request(Trigger::Settle, now + Trigger::Startup.delay())
-            .unwrap();
+        enter_low_epoch(&mut scheduler, now, Trigger::Hidden);
+        let settle_at = now + Trigger::Hidden.delay();
+        let generation = scheduler.request(Trigger::Settle, settle_at).unwrap();
         scheduler.focused(true);
         assert!(scheduler.generation > generation);
         assert!(scheduler.pending.is_none());
         assert_eq!(scheduler.epoch, Epoch::Untrimmed);
-        assert_eq!(scheduler.fire(generation, now + Duration::from_secs(400), false, true, false), None);
-        assert!(scheduler
-            .request(Trigger::Hidden, now + Trigger::Startup.delay())
-            .is_some());
+        assert_eq!(
+            scheduler.fire(generation, now + Duration::from_secs(400), false, true, false),
+            None
+        );
+        let hidden = scheduler.request(Trigger::Hidden, settle_at).unwrap();
+        assert_eq!(
+            scheduler.fire(
+                hidden,
+                settle_at + Trigger::Hidden.delay(),
+                false,
+                true,
+                false,
+            ),
+            None
+        );
+        scheduler.focused(false);
+        assert!(scheduler.request(Trigger::Hidden, settle_at).is_some());
     }
 
     #[test]
@@ -749,16 +964,16 @@ mod tests {
         let now = Instant::now();
         for focused in [true, false] {
             let mut scheduler = IdleTrimScheduler::default();
-            enter_low_epoch(&mut scheduler, now);
-            let requested_at = now + Trigger::Startup.delay();
-            let generation = scheduler.request(Trigger::Settle, requested_at).unwrap();
+            enter_low_epoch(&mut scheduler, now, Trigger::Hidden);
+            let settle_at = now + Trigger::Hidden.delay();
+            let generation = scheduler.request(Trigger::Settle, settle_at).unwrap();
             if focused {
                 scheduler.main_focused = true;
             }
             assert_eq!(
                 scheduler.fire(
                     generation,
-                    requested_at + Trigger::Settle.delay(),
+                    settle_at + Trigger::Settle.delay(),
                     false,
                     true,
                     !focused,
@@ -770,12 +985,15 @@ mod tests {
         }
 
         let mut scheduler = IdleTrimScheduler::default();
-        enter_low_epoch(&mut scheduler, now);
-        let requested_at = now + Trigger::Startup.delay();
-        let generation = scheduler.request(Trigger::Settle, requested_at).unwrap();
-        let deadline = requested_at + Trigger::Settle.delay();
+        enter_low_epoch(&mut scheduler, now, Trigger::Hidden);
+        let settle_at = now + Trigger::Hidden.delay();
+        let generation = scheduler.request(Trigger::Settle, settle_at).unwrap();
+        let deadline = settle_at + Trigger::Settle.delay();
         assert_eq!(scheduler.fire(generation, deadline, true, true, false), None);
-        assert_eq!(scheduler.pending, Some((Trigger::Settle, deadline + Trigger::Settle.delay())));
+        assert_eq!(
+            scheduler.pending,
+            Some((Trigger::Settle, deadline + Trigger::Settle.delay()))
+        );
         assert_eq!(
             scheduler.fire(
                 generation,
@@ -787,298 +1005,205 @@ mod tests {
             None
         );
         assert_eq!(
-            scheduler.fire(generation, deadline + Trigger::Settle.delay(), false, true, false),
+            scheduler.fire(
+                generation,
+                deadline + Trigger::Settle.delay(),
+                false,
+                true,
+                false,
+            ),
             Some(Trigger::Settle)
         );
         assert_eq!(scheduler.epoch, Epoch::Settled);
     }
 
     #[test]
-    fn activation_alone_invalidates_generation() {
-        for trigger in [Trigger::Hidden, Trigger::Startup, Trigger::Deactivated] {
-            let mut s = IdleTrimScheduler::default();
-            let now = Instant::now();
-            let old = s.request(trigger, now).unwrap();
-            s.activate();
-            assert!(s.generation > old);
-            assert!(s.pending.is_none());
-            assert_eq!(s.fire(old, now + Duration::from_secs(30), false, true, false), None);
-            let new = s.request(Trigger::Deactivated, now).unwrap();
-            assert_eq!(
-                s.fire(new, now + Duration::from_secs(15), false, false, false),
-                Some(Trigger::Deactivated)
-            );
-        }
-    }
-
-    #[test]
-    fn shorter_delay_replaces_longer_and_rejects_old_generation() {
-        for longer in [Trigger::Deactivated, Trigger::Startup] {
-            for shorter in [Trigger::Hidden, Trigger::Minimized, Trigger::PopupHidden] {
-                let mut s = IdleTrimScheduler::default();
-                let now = Instant::now();
-                let old = s.request(longer, now).unwrap();
-                let new = s.request(shorter, now).unwrap();
-                assert!(new > old);
-                assert_eq!(s.fire(old, now + Duration::from_secs(3), false, true, false), None);
-                assert_eq!(s.fire(new, now + Duration::from_secs(3), false, true, false), Some(shorter));
-                assert_eq!(s.fire(old, now + Duration::from_secs(15), false, true, false), None);
-            }
-        }
-    }
-
-    #[test]
-    fn longer_request_never_pushes_deadline_out() {
-        let mut s = IdleTrimScheduler::default();
+    fn focus_drops_hidden_trim_without_consuming_epoch() {
         let now = Instant::now();
-        let generation = s.request(Trigger::Hidden, now).unwrap();
-        assert!(s.request(Trigger::Deactivated, now + Duration::from_secs(1)).is_none());
-        assert!(s.request(Trigger::Hidden, now + Duration::from_secs(1)).is_none());
+        let mut scheduler = IdleTrimScheduler::default();
+        let generation = scheduler.request(Trigger::Hidden, now).unwrap();
+        scheduler.focused(true);
         assert_eq!(
-            s.fire(generation, now + Duration::from_secs(3), false, true, false),
-            Some(Trigger::Hidden)
-        );
-        // A shorter trigger arriving late must not push an earlier deadline out.
-        let mut s = IdleTrimScheduler::default();
-        let startup = s.request(Trigger::Startup, now).unwrap();
-        assert!(s.request(Trigger::Hidden, now + Duration::from_secs(7)).is_none());
-        assert_eq!(s.pending, Some((Trigger::Startup, now + Duration::from_secs(8))));
-        assert_eq!(
-            s.fire(startup, now + Duration::from_secs(8), false, true, false),
-            Some(Trigger::Startup)
-        );
-    }
-
-    #[test]
-    fn tracked_focus_gates_admission_and_popup_hide() {
-        let mut s = IdleTrimScheduler::default();
-        let now = Instant::now();
-        assert!(!s.main_focused);
-        s.focused(true);
-        assert!(s.request(Trigger::PopupHidden, now).is_none());
-        let generation = s.request(Trigger::Hidden, now).unwrap();
-        // Tracked focus at fire time drops the request without consuming the epoch.
-        assert_eq!(s.fire(generation, now + Duration::from_secs(3), false, true, false), None);
-        assert!(s.pending.is_none());
-        assert_eq!(s.epoch, Epoch::Untrimmed);
-        assert_eq!(s.fire(generation, now + Duration::from_secs(6), false, true, false), None);
-        s.focused(false);
-        let next = s.request(Trigger::Hidden, now + Duration::from_secs(6)).unwrap();
-        assert_eq!(
-            s.fire(next, now + Duration::from_secs(9), false, true, false),
-            Some(Trigger::Hidden)
-        );
-        s.focused(true);
-        assert_eq!(s.epoch, Epoch::Untrimmed);
-        assert!(s.pending.is_none());
-    }
-
-    #[test]
-    fn focused_true_cancels_pending_request() {
-        let mut s = IdleTrimScheduler::default();
-        let now = Instant::now();
-        let generation = s.request(Trigger::Hidden, now).unwrap();
-        s.focused(true);
-        assert!(s.generation > generation);
-        assert!(s.pending.is_none());
-        assert_eq!(
-            s.fire(generation, now + Duration::from_secs(3), false, false, false),
+            scheduler.fire(generation, now + Trigger::Hidden.delay(), false, true, false),
             None
         );
-    }
-
-    #[test]
-    fn foreground_startup_drops_without_consuming_epoch() {
-        for later in [Trigger::Deactivated, Trigger::Hidden, Trigger::Minimized] {
-            let mut s = IdleTrimScheduler::default();
-            let now = Instant::now();
-            s.focused(true);
-            let generation = s.request(Trigger::Startup, now).unwrap();
-            // Focus wins even when a popup is busy.
-            assert_eq!(s.fire(generation, now + Duration::from_secs(8), true, false, false), None);
-            assert!(s.pending.is_none());
-            assert_eq!(s.epoch, Epoch::Untrimmed);
-            assert!(s.request(Trigger::Startup, now + Duration::from_secs(9)).is_none());
-            s.focused(false);
-            let start = now + Duration::from_secs(9);
-            let next = s.request(later, start).unwrap();
-            assert_eq!(s.pending, Some((later, start + later.delay())));
-            assert_eq!(
-                s.fire(next, start + later.delay() - Duration::from_millis(1), false, true, false),
-                None
-            );
-            assert_eq!(s.fire(next, start + later.delay(), false, true, false), Some(later));
-        }
-    }
-
-    #[test]
-    fn foreground_admission_drops_without_consuming_epoch() {
-        let mut s = IdleTrimScheduler::default();
-        let now = Instant::now();
-        assert!(!s.main_focused);
-        let startup = s.request(Trigger::Startup, now).unwrap();
+        assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+        assert!(scheduler.pending.is_none());
+        scheduler.focused(false);
+        let retry = scheduler.request(Trigger::Hidden, now + Duration::from_secs(4)).unwrap();
         assert_eq!(
-            s.fire(startup, now + Duration::from_secs(8), false, false, true),
-            None
-        );
-        assert_eq!(s.epoch, Epoch::Untrimmed);
-        assert!(s.pending.is_none());
-
-        let hidden_at = now + Duration::from_secs(9);
-        let hidden = s.request(Trigger::Hidden, hidden_at).unwrap();
-        let fire_at = hidden_at + Duration::from_secs(3);
-        // Foreground drops (no 3 s re-poll), even when a popup is also busy.
-        assert_eq!(s.fire(hidden, fire_at, true, true, true), None);
-        assert!(s.pending.is_none());
-        assert_eq!(s.epoch, Epoch::Untrimmed);
-        assert_eq!(s.fire(hidden, fire_at + Duration::from_secs(3), false, true, false), None);
-        let next = s.request(Trigger::Hidden, fire_at).unwrap();
-        assert_eq!(
-            s.fire(next, fire_at + Duration::from_secs(3), false, true, false),
+            scheduler.fire(retry, now + Duration::from_secs(7), false, true, false),
             Some(Trigger::Hidden)
         );
     }
 
     #[test]
     fn busy_postpone_uses_trigger_delay() {
-        for (trigger, delay) in [
-            (Trigger::Deactivated, Duration::from_secs(15)),
-            (Trigger::Hidden, Duration::from_secs(3)),
-        ] {
-            let mut s = IdleTrimScheduler::default();
+        for trigger in [Trigger::Hidden, Trigger::Deactivated] {
+            let mut scheduler = IdleTrimScheduler::default();
             let now = Instant::now();
-            let generation = s.request(trigger, now).unwrap();
-            let fire_at = now + delay;
-            assert_eq!(s.fire(generation, fire_at, true, false, false), None);
-            assert_eq!(s.pending, Some((trigger, fire_at + delay)));
+            let generation = scheduler.request(trigger, now).unwrap();
+            let deadline = now + trigger.delay();
+            let low = trigger != Trigger::Deactivated;
+            assert_eq!(scheduler.fire(generation, deadline, true, low, false), None);
+            assert_eq!(
+                scheduler.pending,
+                Some((trigger, deadline + trigger.delay()))
+            );
         }
     }
 
     #[test]
     fn busy_popup_postpones_and_never_drops() {
-        let mut s = IdleTrimScheduler::default();
+        let mut scheduler = IdleTrimScheduler::default();
         let now = Instant::now();
-        let generation = s.request(Trigger::Startup, now).unwrap();
-        for seconds in [8, 16, 24] {
-            assert_eq!(s.fire(generation, now + Duration::from_secs(seconds), true, false, false), None);
-        }
-        assert_eq!(s.fire(generation, now + Duration::from_secs(31), false, false, false), None);
-        assert_eq!(
-            s.fire(generation, now + Duration::from_secs(32), false, false, false),
-            Some(Trigger::Startup)
-        );
-    }
-
-    #[test]
-    fn visible_then_one_low_trim_per_epoch() {
-        for visible in [Trigger::Startup, Trigger::Deactivated] {
-            for low in [Trigger::Hidden, Trigger::Minimized, Trigger::PopupHidden] {
-                let mut s = IdleTrimScheduler::default();
-                let now = Instant::now();
-                let first = s.request(visible, now).unwrap();
-                let after = now + visible.delay();
-                assert_eq!(s.fire(first, after, false, false, false), Some(visible));
-                assert_eq!(s.epoch, Epoch::Visible);
-                assert!(s.request(Trigger::Deactivated, after).is_none());
-                let second = s.request(low, after).unwrap();
-                assert_eq!(s.fire(second, after + low.delay(), false, true, false), Some(low));
-                assert_eq!(s.epoch, Epoch::Low);
-                for trigger in ALL {
-                    assert_eq!(
-                        s.request(trigger, after + low.delay()).is_some(),
-                        trigger == Trigger::Settle
-                    );
-                }
-                s.activate();
-                assert_eq!(s.epoch, Epoch::Untrimmed);
-                assert!(s.request(Trigger::Hidden, after + low.delay()).is_some());
-            }
-        }
-    }
-
-    #[test]
-    fn hidden_startup_locks_low_epoch() {
-        let mut s = IdleTrimScheduler::default();
-        let now = Instant::now();
-        let generation = s.request(Trigger::Startup, now).unwrap();
-        assert_eq!(
-            s.fire(generation, now + Duration::from_secs(8), false, true, false),
-            Some(Trigger::Startup)
-        );
-        assert_eq!(s.epoch, Epoch::Low);
-        for trigger in ALL {
+        let generation = scheduler.request(Trigger::Hidden, now).unwrap();
+        for seconds in [3, 6, 9] {
             assert_eq!(
-                s.request(trigger, now + Duration::from_secs(9)).is_some(),
-                trigger == Trigger::Settle
+                scheduler.fire(
+                    generation,
+                    now + Duration::from_secs(seconds),
+                    true,
+                    true,
+                    false,
+                ),
+                None
             );
         }
+        assert_eq!(
+            scheduler.fire(generation, now + Duration::from_secs(11), false, true, false),
+            None
+        );
+        assert_eq!(
+            scheduler.fire(generation, now + Duration::from_secs(12), false, true, false),
+            Some(Trigger::Hidden)
+        );
+    }
+
+    #[test]
+    fn earlier_deadline_replaces_deactivation_and_rejects_old_generation() {
+        let mut scheduler = IdleTrimScheduler::default();
+        let now = Instant::now();
+        let old = scheduler.request(Trigger::Deactivated, now).unwrap();
+        let replacement = scheduler.request(Trigger::Hidden, now).unwrap();
+        assert!(replacement > old);
+        assert_eq!(
+            scheduler.fire(old, now + Trigger::Hidden.delay(), false, true, false),
+            None
+        );
+        assert_eq!(
+            scheduler.fire(
+                replacement,
+                now + Trigger::Hidden.delay(),
+                false,
+                true,
+                false,
+            ),
+            Some(Trigger::Hidden)
+        );
+        assert_eq!(
+            scheduler.fire(
+                old,
+                now + Trigger::Deactivated.delay(),
+                false,
+                false,
+                false,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn longer_request_never_pushes_deadline_out() {
+        let mut scheduler = IdleTrimScheduler::default();
+        let now = Instant::now();
+        let generation = scheduler.request(Trigger::Hidden, now).unwrap();
+        assert!(scheduler
+            .request(Trigger::Deactivated, now + Duration::from_secs(1))
+            .is_none());
+        assert_eq!(
+            scheduler.pending,
+            Some((Trigger::Hidden, now + Trigger::Hidden.delay()))
+        );
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                now + Trigger::Hidden.delay(),
+                false,
+                true,
+                false,
+            ),
+            Some(Trigger::Hidden)
+        );
     }
 
     #[test]
     fn abandon_clears_only_matching_generation_and_allows_retry() {
-        let mut s = IdleTrimScheduler::default();
+        let mut scheduler = IdleTrimScheduler::default();
         let now = Instant::now();
-        let generation = s.request(Trigger::Hidden, now).unwrap();
-        let pending = s.pending;
-        s.abandon(generation + 1);
-        assert_eq!(s.pending, pending);
-        s.abandon(generation);
-        assert!(s.pending.is_none());
-        assert_eq!(s.generation, generation);
+        let generation = scheduler.request(Trigger::Hidden, now).unwrap();
+        let pending = scheduler.pending;
+        scheduler.abandon(generation + 1);
+        assert_eq!(scheduler.pending, pending);
+        scheduler.abandon(generation);
+        assert!(scheduler.pending.is_none());
+        assert_eq!(scheduler.generation, generation);
 
         let retry_at = now + Duration::from_secs(1);
-        let retry = s.request(Trigger::Hidden, retry_at).unwrap();
+        let retry = scheduler.request(Trigger::Hidden, retry_at).unwrap();
         assert!(retry > generation);
-        assert_eq!(s.pending, Some((Trigger::Hidden, retry_at + Trigger::Hidden.delay())));
-        let retry_pending = s.pending;
-        s.abandon(generation);
-        assert_eq!(s.pending, retry_pending);
-    }
-
-    #[test]
-    fn popup_hide_does_not_repeat_visible_trim() {
-        let mut s = IdleTrimScheduler::default();
-        let now = Instant::now();
-        let first = s.request(Trigger::Deactivated, now).unwrap();
         assert_eq!(
-            s.fire(first, now + Duration::from_secs(15), false, false, false),
-            Some(Trigger::Deactivated)
+            scheduler.pending,
+            Some((Trigger::Hidden, retry_at + Trigger::Hidden.delay()))
         );
-        let second = s.request(Trigger::PopupHidden, now + Duration::from_secs(16)).unwrap();
-        assert_eq!(s.fire(second, now + Duration::from_secs(19), false, false, false), None);
-        assert_eq!(s.epoch, Epoch::Visible);
+        let retry_pending = scheduler.pending;
+        scheduler.abandon(generation);
+        assert_eq!(scheduler.pending, retry_pending);
     }
 
-    /// Main in the tray: each popup round trip is its own quiet epoch.
     #[test]
-    fn popup_use_reopens_low_epoch_while_main_in_tray() {
-        let mut s = IdleTrimScheduler::default();
+    fn popup_use_reopens_low_epoch_while_main_is_hidden() {
+        let mut scheduler = IdleTrimScheduler::default();
         let now = Instant::now();
-        let start = s.request(Trigger::Startup, now).unwrap();
-        assert_eq!(s.fire(start, now + Duration::from_secs(8), false, true, false), Some(Trigger::Startup));
-        assert_eq!(s.epoch, Epoch::Low);
         for round in 1..=3u64 {
             let shown = now + Duration::from_secs(20 * round);
-            s.activate(); // popup_shown
-            assert_eq!(s.epoch, Epoch::Untrimmed);
-            let hidden = shown + Duration::from_secs(5);
-            let generation = s.request(Trigger::PopupHidden, hidden).unwrap();
+            scheduler.activate();
+            assert_eq!(scheduler.epoch, Epoch::Untrimmed);
+            let hidden_at = shown + Duration::from_secs(5);
+            let generation = scheduler.request(Trigger::PopupHidden, hidden_at).unwrap();
             assert_eq!(
-                s.fire(generation, hidden + Duration::from_secs(3), false, true, false),
+                scheduler.fire(
+                    generation,
+                    hidden_at + Trigger::PopupHidden.delay(),
+                    false,
+                    true,
+                    false,
+                ),
                 Some(Trigger::PopupHidden)
             );
-            assert!(s.request(Trigger::PopupHidden, hidden + Duration::from_secs(4)).is_none());
+            assert!(scheduler
+                .request(Trigger::PopupHidden, hidden_at + Duration::from_secs(4))
+                .is_none());
         }
     }
 
     #[test]
     fn popup_reshown_within_delay_cancels_trim() {
-        let mut s = IdleTrimScheduler::default();
+        let mut scheduler = IdleTrimScheduler::default();
         let now = Instant::now();
-        let generation = s.request(Trigger::PopupHidden, now).unwrap();
-        s.activate(); // popup_shown again before 3 s
-        assert_eq!(s.fire(generation, now + Duration::from_secs(3), false, true, false), None);
-        assert!(s.pending.is_none());
+        let generation = scheduler.request(Trigger::PopupHidden, now).unwrap();
+        scheduler.activate();
+        assert_eq!(
+            scheduler.fire(
+                generation,
+                now + Trigger::PopupHidden.delay(),
+                false,
+                true,
+                false,
+            ),
+            None
+        );
+        assert!(scheduler.pending.is_none());
     }
 
     #[tokio::test]
@@ -1087,7 +1212,7 @@ mod tests {
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
         let untouched = MemoryTrim::default();
-        request(app.handle(), Trigger::Startup);
+        request(app.handle(), Trigger::Hidden);
         let scheduler = untouched.0.lock().unwrap();
         assert_eq!(scheduler.generation, 0);
         assert!(scheduler.pending.is_none());
@@ -1164,7 +1289,10 @@ mod tests {
         let mut scheduler = scheduler.lock().unwrap();
         assert!(scheduler.generation > old);
         assert!(scheduler.pending.is_none());
-        assert_eq!(scheduler.fire(old, Instant::now() + Duration::from_secs(30), false, true, false), None);
+        assert_eq!(
+            scheduler.fire(old, Instant::now() + Duration::from_secs(30), false, true, false),
+            None
+        );
     }
 
     #[cfg(windows)]
@@ -1213,19 +1341,13 @@ mod tests {
         {
             let mut scheduler = scheduler.lock().unwrap();
             let now = Instant::now();
-            let generation = scheduler.request(Trigger::Startup, now).unwrap();
-            assert_eq!(
-                scheduler.fire(generation, now + Trigger::Startup.delay(), false, true, false),
-                Some(Trigger::Startup)
-            );
-            assert_eq!(scheduler.epoch, Epoch::Low);
+            enter_low_epoch(&mut scheduler, now, Trigger::Hidden);
         }
         popup_shown(app.handle());
         assert_eq!(scheduler.lock().unwrap().epoch, Epoch::Untrimmed);
 
-        // popup_shown and activate cancel a pending request through the public API.
         for cancel in [popup_shown::<tauri::test::MockRuntime>, activate] {
-            request(app.handle(), Trigger::PopupHidden);
+            request(app.handle(), Trigger::Deactivated);
             let old = {
                 let scheduler = scheduler.lock().unwrap();
                 assert!(scheduler.pending.is_some() && scheduler.task.is_some());
